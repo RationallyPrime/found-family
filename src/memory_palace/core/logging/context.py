@@ -10,7 +10,6 @@ from typing import Any
 # Import get_logger function from base module
 from .base import get_logger
 
-
 # Create a logger
 logger = get_logger(__name__)
 

@@ -48,6 +48,7 @@ test_*.json
 
 # IDE specific
 .zed/
+.mcp.json
 
 # Temporary scripts
 update_imports.sh

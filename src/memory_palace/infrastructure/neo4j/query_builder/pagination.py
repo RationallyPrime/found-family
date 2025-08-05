@@ -10,7 +10,6 @@ from memory_palace.infrastructure.neo4j.query_builder.state import (
     ClauseType,
 )
 
-
 T = TypeVar("T")
 
 

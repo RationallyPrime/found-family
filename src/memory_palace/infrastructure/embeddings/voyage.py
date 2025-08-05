@@ -20,7 +20,6 @@ from memory_palace.core.errors.patterns import ErrorPattern, PatternMatcher
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models import EmbeddingType
 
-
 # Settings imported at the module level
 logger = get_logger(__name__)
 

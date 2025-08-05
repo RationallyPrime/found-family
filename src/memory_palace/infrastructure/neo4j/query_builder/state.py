@@ -298,24 +298,26 @@ class CypherQueryState:
     def _update_completion_status(self) -> None:
         """Update whether the query is in a complete state."""
         # A query is complete if it ends with RETURN (most common case)
-        if self._clauses and self._clauses[-1] == ClauseType.RETURN:
-            self._is_complete = True
-        # Or ends with a terminating clause like LIMIT after RETURN
-        elif (
-            len(self._clauses) >= 2
-            and ClauseType.RETURN in self._clauses
-            and self._clauses[-1] in {ClauseType.LIMIT, ClauseType.SKIP, ClauseType.ORDER_BY}
+        if (
+            (self._clauses and self._clauses[-1] == ClauseType.RETURN)
+            or (
+                len(self._clauses) >= 2
+                and ClauseType.RETURN in self._clauses
+                and self._clauses[-1] in {ClauseType.LIMIT, ClauseType.SKIP, ClauseType.ORDER_BY}
+            )
+            or (
+                self._clauses
+                and self._clauses[-1]
+                in {
+                    ClauseType.DELETE,
+                    ClauseType.DETACH_DELETE,
+                    ClauseType.CREATE,
+                    ClauseType.MERGE,
+                    ClauseType.SET,
+                    ClauseType.REMOVE,
+                }
+            )
         ):
-            self._is_complete = True
-        # Also complete for pure write operations ending in DELETE, DETACH DELETE, CREATE, MERGE, SET
-        elif self._clauses and self._clauses[-1] in {
-            ClauseType.DELETE,
-            ClauseType.DETACH_DELETE,
-            ClauseType.CREATE,
-            ClauseType.MERGE,
-            ClauseType.SET,
-            ClauseType.REMOVE,
-        }:
             self._is_complete = True
         else:
             self._is_complete = False

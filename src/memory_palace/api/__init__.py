@@ -1,4 +1,5 @@
 """API module."""
+
 from fastapi import APIRouter
 
 from .endpoints import memory

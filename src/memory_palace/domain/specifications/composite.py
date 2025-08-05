@@ -6,7 +6,6 @@ that can be extended for specific domain needs.
 
 from typing import Any, TypeVar
 
-
 T = TypeVar("T")
 
 

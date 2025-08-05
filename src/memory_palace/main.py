@@ -1,11 +1,11 @@
 """Memory Palace FastAPI application."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
 
-from memory_palace.core.config import settings
 from memory_palace.api import router
 
 
@@ -45,4 +45,5 @@ mcp.mount()  # Creates MCP server at /mcp
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

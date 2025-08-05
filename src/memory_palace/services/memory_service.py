@@ -1,12 +1,11 @@
 """Memory storage and retrieval service."""
+
 import json
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models import (
-    Conversation,
     ConversationTurn,
     EmbeddingType,
     Message,
@@ -20,7 +19,7 @@ logger = get_logger(__name__)
 
 class MemoryService:
     """Service for managing conversation memories."""
-    
+
     def __init__(
         self,
         neo4j_driver: Neo4jDriver,
@@ -28,13 +27,13 @@ class MemoryService:
     ):
         self.neo4j = neo4j_driver
         self.embeddings = embedding_service
-        
+
     async def store_turn(
         self,
         user_content: str,
         assistant_content: str,
-        conversation_id: Optional[UUID] = None,
-        metadata: Optional[dict] = None,
+        conversation_id: UUID | None = None,
+        metadata: dict | None = None,
     ) -> ConversationTurn:
         """Store a conversation turn (user message + assistant response)."""
         # Create messages
@@ -43,37 +42,37 @@ class MemoryService:
             content=user_content,
             timestamp=datetime.utcnow(),
         )
-        
+
         assistant_msg = Message(
             role=MessageRole.ASSISTANT,
             content=assistant_content,
             timestamp=datetime.utcnow(),
         )
-        
+
         # Generate embeddings
         user_embedding = await self.embeddings.embed_single(user_content)
         assistant_embedding = await self.embeddings.embed_single(assistant_content)
-        
+
         user_msg.embedding = user_embedding
         assistant_msg.embedding = assistant_embedding
-        
+
         # Create turn
         turn = ConversationTurn(
             user_message=user_msg,
             assistant_message=assistant_msg,
             metadata=metadata or {},
         )
-        
+
         # Store in Neo4j
         await self._store_turn_in_neo4j(turn, conversation_id)
-        
+
         logger.info(f"Stored conversation turn {turn.id}")
         return turn
-        
+
     async def _store_turn_in_neo4j(
         self,
         turn: ConversationTurn,
-        conversation_id: Optional[UUID],
+        conversation_id: UUID | None,
     ):
         """Store turn in Neo4j graph."""
         # This will use the Neo4j query builder we copied from Sokrates
@@ -104,7 +103,7 @@ class MemoryService:
         CREATE (t)-[:ASSISTANT_MESSAGE]->(a)
         CREATE (u)-[:FOLLOWED_BY]->(a)
         """
-        
+
         params = {
             "conversation_id": str(conversation_id) if conversation_id else str(turn.id),
             "turn_id": str(turn.id),
@@ -119,10 +118,10 @@ class MemoryService:
             "assistant_embedding": turn.assistant_message.embedding,
             "assistant_timestamp": turn.assistant_message.timestamp.isoformat(),
         }
-        
+
         async with self.neo4j.session() as session:
             await session.run(query, params)
-            
+
     async def search_memories(
         self,
         query: str,
@@ -132,10 +131,9 @@ class MemoryService:
         """Search for relevant memories using semantic similarity."""
         # Generate query embedding
         query_embedding = await self.embeddings.embed_single(
-            query,
-            embedding_type=EmbeddingType.QUERY
+            query, embedding_type=EmbeddingType.QUERY
         )
-        
+
         # Search in Neo4j using vector similarity (Community Edition compatible)
         # Calculate cosine similarity manually since GDS is not available
         search_query = """
@@ -154,13 +152,13 @@ class MemoryService:
         ORDER BY similarity DESC
         LIMIT $k
         """
-        
+
         params = {
             "query_embedding": query_embedding,
             "threshold": threshold,
             "k": k,
         }
-        
+
         async with self.neo4j.session() as session:
             result = await session.run(search_query, params)
             messages = []
@@ -174,5 +172,5 @@ class MemoryService:
                     embedding=msg_data["embedding"],
                 )
                 messages.append(msg)
-                
+
         return messages

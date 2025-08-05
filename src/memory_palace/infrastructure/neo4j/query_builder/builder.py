@@ -30,7 +30,6 @@ from memory_palace.infrastructure.neo4j.query_builder.state import (
     CypherQueryState,
 )
 
-
 logger: FilteringBoundLogger = get_logger(name=__name__)
 
 # Generic type variable for query results

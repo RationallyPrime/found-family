@@ -6,7 +6,6 @@ building reusable, composable query predicates for domain entities.
 
 from typing import Any, Protocol, TypeVar
 
-
 T = TypeVar("T")  # Entity type
 
 

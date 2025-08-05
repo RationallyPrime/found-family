@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import logfire
 from neo4j import AsyncDriver, AsyncTransaction
 
-
 if TYPE_CHECKING:
     from neo4j import AsyncResult
 
@@ -23,7 +22,6 @@ from memory_palace.infrastructure.neo4j.query_builder.builder import (
 from memory_palace.infrastructure.neo4j.query_builder.metrics import (
     MetricsCollector,
 )
-
 
 # Generic type variable for query results
 T = TypeVar(name="T")

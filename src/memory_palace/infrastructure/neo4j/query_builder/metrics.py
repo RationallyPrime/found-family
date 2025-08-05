@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 import logfire
 from neo4j._async.work.result import AsyncResult
 
-
 if TYPE_CHECKING:
     from neo4j._data import Record
 
@@ -26,7 +25,6 @@ from memory_palace.core.logging import (
     info,
     update_log_context,
 )
-
 
 # Generic type variable for metrics context
 T = TypeVar(name="T")

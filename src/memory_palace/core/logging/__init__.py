@@ -17,7 +17,6 @@ from .context import (
 )
 from .setup import get_logger, setup_logging
 
-
 __all__ = [
     "clear_log_context",
     "critical",

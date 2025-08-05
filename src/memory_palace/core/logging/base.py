@@ -6,7 +6,6 @@ This module contains base logging functionality used by other logging modules.
 import structlog
 from structlog.typing import FilteringBoundLogger
 
-
 # Default log level
 LOG_LEVEL = "INFO"
 

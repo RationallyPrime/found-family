@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Generic, LiteralString, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
-
 if TYPE_CHECKING:
     from neo4j._async.work.result import AsyncResult
     from neo4j._data import Record
@@ -23,7 +22,6 @@ from memory_palace.core.errors.base import (
 from memory_palace.core.errors.decorators import with_error_handling
 from memory_palace.core.errors.exceptions import ServiceError
 from memory_palace.core.logging import get_logger
-
 
 logger = get_logger(__name__)
 

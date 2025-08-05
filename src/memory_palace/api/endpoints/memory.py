@@ -1,12 +1,11 @@
 """Memory API endpoints."""
-from typing import Optional
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from memory_palace.api.dependencies import get_memory_service
-from memory_palace.domain.models import ConversationTurn, Message
 from memory_palace.services.memory_service import MemoryService
 
 router = APIRouter()
@@ -14,20 +13,23 @@ router = APIRouter()
 
 class StoreTurnRequest(BaseModel):
     """Request model for storing a conversation turn."""
+
     user_content: str
     assistant_content: str
-    conversation_id: Optional[UUID] = None
-    metadata: Optional[dict] = None
+    conversation_id: UUID | None = None
+    metadata: dict | None = None
 
 
 class StoreTurnResponse(BaseModel):
     """Response model for storing a turn."""
+
     turn_id: UUID
     message: str = "Turn stored successfully"
 
 
 class SearchRequest(BaseModel):
     """Request model for searching memories."""
+
     query: str
     k: int = 10
     threshold: float = 0.7
@@ -35,6 +37,7 @@ class SearchRequest(BaseModel):
 
 class SearchResponse(BaseModel):
     """Response model for search results."""
+
     messages: list[dict]
     count: int
 
@@ -69,7 +72,7 @@ async def recall_memories(
             k=request.k,
             threshold=request.threshold,
         )
-        
+
         # Convert to dict for response
         message_dicts = [
             {
@@ -80,7 +83,7 @@ async def recall_memories(
             }
             for msg in messages
         ]
-        
+
         return SearchResponse(
             messages=message_dicts,
             count=len(messages),

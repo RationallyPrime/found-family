@@ -11,7 +11,6 @@ from .patterns import NodePattern, PatternBuilder, RelationshipPattern
 from .state import ClauseType, CypherQueryState
 from .vector import VectorSearchMixin
 
-
 __all__ = [
     "ClauseType",
     # Base query builder

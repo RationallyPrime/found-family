@@ -11,7 +11,6 @@ from memory_palace.infrastructure.neo4j.query_builder.state import (
     ClauseType,
 )
 
-
 # Generic type variable for query results
 T = TypeVar("T")
 
