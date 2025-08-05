@@ -1,0 +1,17 @@
+# Add these dependencies to your existing pyproject.toml
+
+[project]
+dependencies = [
+    # ... your existing dependencies ...
+    
+    # OAuth and JWT
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.6",  # For form data parsing
+    
+    # Server-Sent Events
+    "sse-starlette>=1.6.5",
+    
+    # Additional security
+    "cryptography>=41.0.0",
+]

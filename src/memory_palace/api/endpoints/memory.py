@@ -18,6 +18,10 @@ class StoreTurnRequest(BaseModel):
     assistant_content: str
     conversation_id: UUID | None = None
     metadata: dict | None = None
+    
+    # Incremental ontology support
+    ontology_path: list[str] | None = None
+    salience: float | None = None
 
 
 class StoreTurnResponse(BaseModel):
@@ -33,6 +37,11 @@ class SearchRequest(BaseModel):
     query: str
     k: int = 10
     threshold: float = 0.7
+    
+    # Enhanced search filters
+    min_salience: float | None = None
+    topic_ids: list[int] | None = None
+    ontology_path: list[str] | None = None
 
 
 class SearchResponse(BaseModel):
@@ -54,6 +63,8 @@ async def remember_turn(
             assistant_content=request.assistant_content,
             conversation_id=request.conversation_id,
             metadata=request.metadata,
+            ontology_path=request.ontology_path,
+            salience=request.salience,
         )
         return StoreTurnResponse(turn_id=turn.id)
     except Exception as e:

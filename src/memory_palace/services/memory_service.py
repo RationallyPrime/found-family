@@ -34,9 +34,11 @@ class MemoryService:
         assistant_content: str,
         conversation_id: UUID | None = None,
         metadata: dict | None = None,
+        ontology_path: list[str] | None = None,
+        salience: float | None = None,
     ) -> ConversationTurn:
         """Store a conversation turn (user message + assistant response)."""
-        # Create messages
+        # Create messages with ontology support
         user_msg = Message(
             role=MessageRole.USER,
             content=user_content,
@@ -48,6 +50,15 @@ class MemoryService:
             content=assistant_content,
             timestamp=datetime.utcnow(),
         )
+        
+        # Add ontology metadata if provided
+        if ontology_path:
+            user_msg.ontology_path = ontology_path
+            assistant_msg.ontology_path = ontology_path
+        
+        if salience is not None:
+            user_msg.salience = salience
+            assistant_msg.salience = salience
 
         # Generate embeddings
         user_embedding = await self.embeddings.embed_single(user_content)
@@ -89,14 +100,18 @@ class MemoryService:
             role: 'user',
             content: $user_content,
             embedding: $user_embedding,
-            timestamp: $user_timestamp
+            timestamp: $user_timestamp,
+            ontology_path: $user_ontology_path,
+            salience: $user_salience
         })
         CREATE (a:Message {
             id: $assistant_msg_id,
             role: 'assistant', 
             content: $assistant_content,
             embedding: $assistant_embedding,
-            timestamp: $assistant_timestamp
+            timestamp: $assistant_timestamp,
+            ontology_path: $assistant_ontology_path,
+            salience: $assistant_salience
         })
         CREATE (c)-[:HAS_TURN]->(t)
         CREATE (t)-[:USER_MESSAGE]->(u)
@@ -113,10 +128,14 @@ class MemoryService:
             "user_content": turn.user_message.content,
             "user_embedding": turn.user_message.embedding,
             "user_timestamp": turn.user_message.timestamp.isoformat(),
+            "user_ontology_path": getattr(turn.user_message, 'ontology_path', []),
+            "user_salience": getattr(turn.user_message, 'salience', 0.5),
             "assistant_msg_id": str(turn.assistant_message.id),
             "assistant_content": turn.assistant_message.content,
             "assistant_embedding": turn.assistant_message.embedding,
             "assistant_timestamp": turn.assistant_message.timestamp.isoformat(),
+            "assistant_ontology_path": getattr(turn.assistant_message, 'ontology_path', []),
+            "assistant_salience": getattr(turn.assistant_message, 'salience', 0.5),
         }
 
         async with self.neo4j.session() as session:
