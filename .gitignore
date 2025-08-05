@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# UV
+.uv/
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Neo4j
+neo4j-data/
+
+# Logs
+*.log
+logs/
+
+# Frontend (if added later)
+node_modules/
+.pnpm-store/
+dist/
+
+# Test files
+test_*.json
+
+# IDE specific
+.zed/
+
+# Temporary scripts
+update_imports.sh
+mem_palace_updated.sh
