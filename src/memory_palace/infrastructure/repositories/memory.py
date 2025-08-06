@@ -70,10 +70,18 @@ class GenericMemoryRepository(Generic[T]):
             
             if similarity_search:
                 embedding, threshold = similarity_search
+                # Manual cosine similarity for Neo4j Community Edition
                 query = f"""
                 MATCH (m:{labels_str})
                 WHERE m.embedding IS NOT NULL
-                WITH m, gds.similarity.cosine(m.embedding, $embedding) AS similarity
+                WITH m, 
+                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) | 
+                            dot + m.embedding[i] * $embedding[i]) AS dotProduct,
+                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) | 
+                            sum + m.embedding[i] * m.embedding[i])) AS norm1,
+                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) | 
+                            sum + $embedding[i] * $embedding[i])) AS norm2
+                WITH m, dotProduct / (norm1 * norm2) AS similarity
                 WHERE similarity > $threshold
                 {self._build_filter_clause(filters) if filters else ""}
                 RETURN m, similarity
@@ -285,10 +293,18 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         try:
             if similarity_search:
                 embedding, threshold = similarity_search
+                # Manual cosine similarity for Neo4j Community Edition
                 query = """
                 MATCH (m:Memory)
                 WHERE m.embedding IS NOT NULL
-                WITH m, gds.similarity.cosine(m.embedding, $embedding) AS similarity
+                WITH m, 
+                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) | 
+                            dot + m.embedding[i] * $embedding[i]) AS dotProduct,
+                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) | 
+                            sum + m.embedding[i] * m.embedding[i])) AS norm1,
+                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) | 
+                            sum + $embedding[i] * $embedding[i])) AS norm2
+                WITH m, dotProduct / (norm1 * norm2) AS similarity
                 WHERE similarity > $threshold
                 {filter_clause}
                 RETURN m, similarity

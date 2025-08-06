@@ -1,13 +1,15 @@
 """Memory API endpoints."""
 
 import traceback
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from memory_palace.api.dependencies import get_memory_service
+from memory_palace.api.dependencies import get_memory_service, neo4j_driver
 from memory_palace.core.logging import get_logger
+from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
 from memory_palace.services.memory_service import MemoryService
 
 logger = get_logger(__name__)
@@ -105,7 +107,9 @@ async def recall_memories(
         messages = await memory_service.search_memories(
             query=request.query,
             limit=request.k,  # Map k to limit
-            # Note: threshold isn't used in search_memories, could add similarity filtering later
+            similarity_threshold=request.threshold,  # Pass threshold to service
+            min_salience=request.min_salience,
+            topic_id=request.topic_ids[0] if request.topic_ids else None,
         )
 
         # Convert to dict for response
@@ -137,6 +141,176 @@ async def recall_memories(
                 "traceback": traceback.format_exc()
             }
         )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class QueryBuilderRequest(BaseModel):
+    """Request model for query builder endpoint."""
+    
+    # Match patterns
+    node_label: str = "Memory"
+    node_filters: dict[str, Any] | None = None
+    
+    # Optional similarity search
+    use_similarity: bool = False
+    query_text: str | None = None
+    similarity_threshold: float = 0.5
+    
+    # Return options
+    return_fields: list[str] = ["id", "content", "memory_type"]
+    order_by: str | None = None
+    limit: int = 10
+    
+    # Advanced options
+    include_relationships: bool = False
+    relationship_depth: int = 1
+
+
+class QueryBuilderResponse(BaseModel):
+    """Response model for query builder results."""
+    
+    cypher_query: str
+    parameters: dict[str, Any]
+    results: list[dict[str, Any]]
+    count: int
+
+
+@router.post("/query", response_model=QueryBuilderResponse)
+async def execute_query_builder(
+    request: QueryBuilderRequest,
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> QueryBuilderResponse:
+    """Execute a Cypher query using the query builder pattern."""
+    try:
+        logger.info("Building Cypher query", extra={
+            "node_label": request.node_label,
+            "use_similarity": request.use_similarity,
+            "limit": request.limit
+        })
+        
+        # Build the query using CypherQueryBuilder
+        builder = CypherQueryBuilder()
+        
+        # Start with basic match
+        if request.node_filters:
+            builder.match(lambda p: p.node(request.node_label, "n", **request.node_filters))
+        else:
+            builder.match(lambda p: p.node(request.node_label, "n"))
+        
+        # Add similarity search if requested
+        params = {}
+        if request.use_similarity and request.query_text:
+            # Get embedding for the query
+            query_embedding = await memory_service.embeddings.embed_text(request.query_text)
+            params["query_embedding"] = query_embedding
+            
+            # Add cosine similarity calculation using parameter
+            builder.with_clause(
+                "n",
+                """
+                reduce(dot = 0.0, i IN range(0, size(n.embedding)-1) | 
+                       dot + n.embedding[i] * $query_embedding[i]) / 
+                (sqrt(reduce(sum = 0.0, i IN range(0, size(n.embedding)-1) | 
+                       sum + n.embedding[i] * n.embedding[i])) * 
+                 sqrt(reduce(sum = 0.0, i IN range(0, size($query_embedding)-1) | 
+                       sum + $query_embedding[i] * $query_embedding[i]))) AS similarity
+                """
+            )
+            builder.where(f"similarity > {request.similarity_threshold}")
+        
+        # Add relationship traversal if requested
+        if request.include_relationships:
+            builder.optional_match(
+                lambda p: p.node("n")
+                          .rel(f"*1..{request.relationship_depth}")
+                          .node(request.node_label, "related")
+            )
+            builder.with_clause("n", "COLLECT(DISTINCT related) AS relationships")
+        
+        # Build return clause
+        return_items = []
+        for field in request.return_fields:
+            return_items.append(f"n.{field} AS {field}")
+        
+        if request.use_similarity:
+            return_items.append("similarity")
+        
+        if request.include_relationships:
+            return_items.append("relationships")
+        
+        builder.return_clause(*return_items)
+        
+        # Add ordering if specified
+        if request.order_by:
+            builder.order_by(request.order_by)
+        elif request.use_similarity:
+            builder.order_by("similarity DESC")
+        
+        # Add limit
+        builder.limit(request.limit)
+        
+        # Get the query and parameters
+        cypher_query, builder_params = builder.build()
+        
+        # Merge parameters
+        all_params = {**builder_params, **params}
+        
+        logger.info(f"Executing Cypher query: {cypher_query}")
+        logger.debug(f"Parameters: {list(all_params.keys())}")
+        
+        # Execute using the session from memory_service
+        result = await memory_service.session.run(cypher_query, **all_params)
+        records = await result.data()
+        
+        logger.info(f"Query returned {len(records)} results")
+        
+        # Remove embedding from parameters for response (too large)
+        response_params = {k: v for k, v in all_params.items() 
+                          if k != "query_embedding"}
+        if "query_embedding" in all_params:
+            response_params["query_embedding"] = f"<embedding vector of length {len(all_params['query_embedding'])}>"
+        
+        return QueryBuilderResponse(
+            cypher_query=cypher_query,
+            parameters=response_params,
+            results=records,
+            count=len(records)
+        )
+        
+    except Exception as e:
+        logger.error(
+            "Failed to execute query builder",
+            exc_info=True,
+            extra={
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/raw_query")
+async def execute_raw_query(
+    query: str,
+    parameters: dict[str, Any] | None = None,
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> dict:
+    """Execute a raw Cypher query (for debugging)."""
+    try:
+        logger.warning(f"Executing raw Cypher query: {query}")
+        
+        result = await memory_service.session.run(query, **(parameters or {}))
+        records = await result.data()
+        
+        return {
+            "query": query,
+            "parameters": parameters,
+            "results": records,
+            "count": len(records)
+        }
+        
+    except Exception as e:
+        logger.error(f"Raw query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

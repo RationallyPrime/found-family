@@ -25,6 +25,7 @@ from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 from memory_palace.api.endpoints import memory
 from memory_palace.api import dependencies
+from memory_palace.api.dependencies import get_memory_service
 from neo4j import AsyncDriver
 
 # Configure Logfire and logging
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Set global dependencies for API endpoints
         dependencies.neo4j_driver = neo4j_driver
         dependencies.embedding_service = embedding_service
+        dependencies.neo4j_query = Neo4jQuery(neo4j_driver)
 
         # Note: We'll create sessions per-request, not hold one open
         logger.info("💾 Services initialized and ready...")
@@ -130,22 +132,7 @@ mcp = FastApiMCP(app)
 mcp.mount()  # Creates MCP server at /mcp
 
 
-# Dependency to get memory service
-async def get_memory_service() -> MemoryService:
-    """Dependency to get the memory service instance."""
-    if neo4j_driver is None or embedding_service is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Services not initialized"
-        )
-    
-    # Create a new session for this request
-    session = neo4j_driver.session()
-    return MemoryService(
-        session=session,
-        embeddings=embedding_service,
-        clusterer=None
-    )
+# Note: get_memory_service is imported from dependencies module
 
 
 # Dependency to get dream orchestrator

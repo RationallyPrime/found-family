@@ -25,7 +25,10 @@ from memory_palace.domain.models.memories import (
     UserUtterance,
 )
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
-from memory_palace.infrastructure.repositories.memory import GenericMemoryRepository
+from memory_palace.infrastructure.repositories.memory import (
+    GenericMemoryRepository,
+    MemoryRepository,
+)
 
 if TYPE_CHECKING:
     from neo4j import AsyncSession
@@ -51,7 +54,8 @@ class MemoryService:
         # Create typed repositories
         self.user_repo = GenericMemoryRepository[UserUtterance](session)
         self.assistant_repo = GenericMemoryRepository[AssistantUtterance](session)
-        self.memory_repo = GenericMemoryRepository[Memory](session)
+        # Use the specialized MemoryRepository for the discriminated union
+        self.memory_repo = MemoryRepository(session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
     
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
@@ -401,6 +405,7 @@ class MemoryService:
         conversation_id: UUID | None = None,
         topic_id: int | None = None,
         min_salience: float | None = None,
+        similarity_threshold: float = 0.7,
         limit: int = 50,
     ) -> list[Memory]:
         """Search memories using specifications and filters.
@@ -420,22 +425,25 @@ class MemoryService:
         # If we have a query, use similarity search
         similarity_search = None
         if query:
+            logger.info(f"Performing similarity search with threshold {similarity_threshold}")
             query_embedding = await self.embeddings.embed_text(query)
-            similarity_search = (query_embedding, 0.7)
+            similarity_search = (query_embedding, similarity_threshold)
         
         # Use repository for type-safe querying
+        logger.debug(f"Calling recall_any with filters={filters}, similarity_search={'Yes' if similarity_search else 'No'}, limit={limit}")
         results = await self.memory_repo.recall_any(
             filters=filters,
             similarity_search=similarity_search,
             limit=limit
         )
+        logger.debug(f"recall_any returned {len(results)} results")
         
         # Filter by memory types if specified
         if memory_types:
             type_values = {mt.value for mt in memory_types}
             results = [r for r in results if r.memory_type.value in type_values]
         
-        logger.info(f"Search returned {len(results)} memories")
+        logger.info(f"Search returned {len(results)} memories after filtering")
         return results
     
     async def get_conversation_history(
