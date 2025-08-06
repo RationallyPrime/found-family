@@ -29,6 +29,9 @@ from memory_palace.infrastructure.neo4j.query_builder.state import (
     ClauseType,
     CypherQueryState,
 )
+from memory_palace.infrastructure.neo4j.query_builder.specification_support import (
+    SpecificationSupport,
+)
 
 logger: FilteringBoundLogger = get_logger(name=__name__)
 
@@ -55,11 +58,12 @@ def create_literal_str(prefix: str, clause: str) -> LiteralString:
     return cast("LiteralString", prefix + clause)
 
 
-class CypherQueryBuilder(QueryBuilder, Generic[T]):
-    """Type-safe fluent Cypher query builder.
+class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
+    """Type-safe fluent Cypher query builder with Specification support.
 
     This class provides a fluent interface for building Cypher queries
-    with compile-time type checking and proper query validation.
+    with compile-time type checking, proper query validation, and
+    specification-based filtering support.
 
     Generic Parameters:
         T: The type of the query results (typically a Pydantic model)
