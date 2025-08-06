@@ -210,7 +210,7 @@ class VoyageEmbeddingService:
                     continue
 
                 # If we're here, either it's not retryable or we're out of retries
-                raise self._handle_error(e, 0, valid_texts, self.model)
+                raise self._handle_error(e, 0, valid_texts, self.model) from e
 
         # Should never reach here due to the raise above
         raise ProcessingError(

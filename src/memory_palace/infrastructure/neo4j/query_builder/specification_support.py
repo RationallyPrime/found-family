@@ -33,7 +33,7 @@ class SpecificationSupport:
                 elif op == "lte":
                     conditions.append(f"m.{field} <= {value}")
                 elif op == "in":
-                    if isinstance(value, (list, tuple)):
+                    if isinstance(value, list | tuple):
                         value_str = str(list(value))
                     else:
                         value_str = f"[{value}]"

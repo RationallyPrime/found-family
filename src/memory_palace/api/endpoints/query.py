@@ -90,13 +90,14 @@ async def build_and_execute_query(
         # Add MATCH patterns
         if request.match_patterns:
             for pattern in request.match_patterns:
+                # Capture loop variables in default arguments
                 if pattern.properties:
                     builder.match(
-                        lambda p: p.node(pattern.node_label, pattern.node_alias, **pattern.properties)
+                        lambda p, label=pattern.node_label, alias=pattern.node_alias, props=pattern.properties: p.node(label, alias, **props)
                     )
                 else:
                     builder.match(
-                        lambda p: p.node(pattern.node_label, pattern.node_alias)
+                        lambda p, label=pattern.node_label, alias=pattern.node_alias: p.node(label, alias)
                     )
         else:
             # Default match pattern
@@ -185,7 +186,7 @@ async def build_and_execute_query(
             async for record in result:
                 # Convert record to dict
                 record_dict = {}
-                for key in record.keys():
+                for key in record:
                     value = record[key]
                     # Handle Neo4j nodes/relationships
                     if hasattr(value, '__dict__'):
@@ -239,7 +240,7 @@ async def execute_direct_cypher(
             records = []
             async for record in result:
                 record_dict = {}
-                for key in record.keys():
+                for key in record:
                     value = record[key]
                     if hasattr(value, '__dict__'):
                         record_dict[key] = dict(value)

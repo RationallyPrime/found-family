@@ -320,7 +320,7 @@ class Neo4jQuery(Generic[T]):
                                 message=f"Batch operation failed: {e!s}",
                                 code=ErrorCode.DB_QUERY,
                                 details=details,
-                            )
+                            ) from e
 
         # Log summary
         failed_count = len(failed_operations)

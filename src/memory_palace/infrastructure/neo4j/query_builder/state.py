@@ -4,6 +4,7 @@ This module provides state tracking to ensure semantically valid Cypher queries.
 """
 
 from enum import Enum, auto
+from typing import ClassVar
 
 
 class ClauseType(Enum):
@@ -46,7 +47,7 @@ class CypherQueryState:
     """
 
     # Define valid clause sequences
-    _VALID_AFTER: dict[ClauseType, set[ClauseType]] = {
+    _VALID_AFTER: ClassVar[dict[ClauseType, set[ClauseType]]] = {
         # After MATCH, we can have WHERE, WITH, RETURN, or another MATCH
         ClauseType.MATCH: {
             ClauseType.MATCH,
@@ -223,7 +224,7 @@ class CypherQueryState:
     }
 
     # Valid start clauses
-    _VALID_START_CLAUSES: set[ClauseType] = {
+    _VALID_START_CLAUSES: ClassVar[set[ClauseType]] = {
         ClauseType.MATCH,
         ClauseType.OPTIONAL_MATCH,
         ClauseType.CREATE,
@@ -233,7 +234,7 @@ class CypherQueryState:
     }
 
     # Clauses that can appear only once in a single query segment (between WITH clauses)
-    _ONCE_PER_SEGMENT: set[ClauseType] = {ClauseType.RETURN}
+    _ONCE_PER_SEGMENT: ClassVar[set[ClauseType]] = {ClauseType.RETURN}
 
     def __init__(self) -> None:
         """Initialize the Cypher query state."""

@@ -145,7 +145,7 @@ class AttributeSpecification(BaseSpecification):
 class AlwaysTrueSpecification(BaseSpecification):
     """Specification that always evaluates to true."""
 
-    def is_satisfied_by(self, entity: Any) -> bool:
+    def is_satisfied_by(self, entity: Any) -> bool:  # noqa: ARG002
         """Always returns True."""
         return True
 
@@ -157,7 +157,7 @@ class AlwaysTrueSpecification(BaseSpecification):
 class AlwaysFalseSpecification(BaseSpecification):
     """Specification that always evaluates to false."""
 
-    def is_satisfied_by(self, entity: Any) -> bool:
+    def is_satisfied_by(self, entity: Any) -> bool:  # noqa: ARG002
         """Always returns False."""
         return False
 

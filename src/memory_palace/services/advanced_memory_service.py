@@ -187,7 +187,7 @@ class AdvancedMemoryService:
     ) -> list[tuple[EnhancedMemoryChunk, RelationType, float]]:
         """Find memories related to a source memory through the graph."""
 
-        spec = RelatedMemorySpecification(
+        RelatedMemorySpecification(
             source_id=source_id,
             relationship_types=relationship_types,
             min_strength=0.0
@@ -272,7 +272,7 @@ class AdvancedMemoryService:
     async def evolve_ontology(
         self,
         min_cluster_size: int = 15,
-        merge_threshold: float = 0.8,
+        merge_threshold: float = 0.8,  # noqa: ARG002
     ) -> list[TopicCluster]:
         """Evolve the ontology by clustering and merging topics."""
 
@@ -291,7 +291,7 @@ class AdvancedMemoryService:
         )
 
         query_str, params = builder.build()
-        results = await self.neo4j.run_query(query_str, params)
+        await self.neo4j.run_query(query_str, params)
 
         # Here you would:
         # 1. Run HDBSCAN clustering
@@ -358,11 +358,12 @@ class AdvancedMemoryService:
         # Create nodes
         for memory in [user_memory, assistant_memory]:
             builder = CypherQueryBuilder[Any]()
+            memory_data = memory.model_dump(exclude={"embedding"})
             builder.create(
-                lambda p: p.node(
+                lambda p, data=memory_data: p.node(
                     "Message",
                     "m",
-                    **memory.model_dump(exclude={"embedding"})
+                    **data
                 )
             ).set_property(
                 "m",
@@ -391,8 +392,9 @@ class AdvancedMemoryService:
         for memory_id in memory_ids:
             # Count relationships
             builder = CypherQueryBuilder[Any]()
+            mem_id_str = str(memory_id)
             builder.match(
-                lambda p: p.node("Message", "m", id=str(memory_id))
+                lambda p, id_val=mem_id_str: p.node("Message", "m", id=id_val)
             ).optional_match(
                 lambda p: p.custom("(m)-[r]-()")
             ).return_clause(
@@ -411,8 +413,9 @@ class AdvancedMemoryService:
                 new_salience = min(1.0, 0.5 + (rel_count * 0.1))
 
                 update_builder = CypherQueryBuilder[Any]()
+                mem_id_str_update = str(memory_id)
                 update_builder.match(
-                    lambda p: p.node("Message", "m", id=str(memory_id))
+                    lambda p, id_val=mem_id_str_update: p.node("Message", "m", id=id_val)
                 ).set_property(
                     "m",
                     {"salience": new_salience}

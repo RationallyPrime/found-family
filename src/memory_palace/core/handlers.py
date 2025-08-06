@@ -51,14 +51,14 @@ class ErrorHandler:
         return response
 
     async def handle_async(
-        self, error: Exception, level: ErrorLevel, context: dict[str, Any]
+        self, error: Exception, level: ErrorLevel, context: dict[str, Any]  # noqa: ARG002
     ) -> dict[str, Any]:
         """Handle error asynchronously"""
         async with self.context_manager as error_context:
             return self._format_response(error_context, level, context)
 
     def handle_sync(
-        self, error: Exception, level: ErrorLevel, context: dict[str, Any]
+        self, error: Exception, level: ErrorLevel, context: dict[str, Any]  # noqa: ARG002
     ) -> dict[str, Any]:
         """Handle error synchronously"""
         with self.context_manager as error_context:

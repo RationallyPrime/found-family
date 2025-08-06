@@ -149,7 +149,7 @@ class RelatedMemorySpecification(BaseSpecification):
         self.relationship_types = relationship_types
         self.min_strength = min_strength
     
-    def is_satisfied_by(self, entity: Any) -> bool:
+    def is_satisfied_by(self, entity: Any) -> bool:  # noqa: ARG002
         # This requires graph traversal, not simple property check
         return False
     

@@ -88,7 +88,7 @@ async def remember_turn(
                 "traceback": traceback.format_exc()
             }
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/recall", response_model=SearchResponse)
@@ -141,7 +141,7 @@ async def recall_memories(
                 "traceback": traceback.format_exc()
             }
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class QueryBuilderRequest(BaseModel):
@@ -286,7 +286,7 @@ async def execute_query_builder(
                 "traceback": traceback.format_exc()
             }
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/raw_query")
@@ -311,7 +311,7 @@ async def execute_raw_query(
         
     except Exception as e:
         logger.error(f"Raw query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/health")

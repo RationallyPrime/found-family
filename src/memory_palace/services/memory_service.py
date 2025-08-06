@@ -257,7 +257,7 @@ class MemoryService:
         k: int = 24,
         use_ontology_boost: bool = True,
         expand_depth: int = 2,
-        boost_factor: float = 1.2,
+        boost_factor: float = 1.2,  # noqa: ARG002
     ) -> list[Memory]:
         """Multi-stage recall with ontology boost and graph expansion.
         
@@ -352,10 +352,11 @@ class MemoryService:
             for seed in seed_memories:
                 # Find memories connected to this seed
                 builder = CypherQueryBuilder()
+                seed_id_str = str(seed.id)
                 query = (
                     builder
-                    .match(lambda p: p
-                          .node("Memory", "seed", id=str(seed.id))
+                    .match(lambda p, sid=seed_id_str: p
+                          .node("Memory", "seed", id=sid)
                           .rel("RELATES_TO|SIMILAR_TO|FOLLOWED_BY", "r")
                           .node("Memory", "connected")
                           )

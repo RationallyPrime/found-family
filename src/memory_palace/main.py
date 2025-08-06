@@ -40,7 +40,7 @@ embedding_service: VoyageEmbeddingService | None = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
     """Application lifecycle manager with DreamJobOrchestrator integration."""
     global memory_service, dream_orchestrator, neo4j_driver, embedding_service
 
@@ -248,7 +248,7 @@ async def store_conversation_turn(
 
     except Exception as e:
         logger.error(f"Failed to store conversation turn: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/memory/search", response_model=list[MemoryResponse])
@@ -281,7 +281,7 @@ async def search_memories(
 
     except Exception as e:
         logger.error(f"Memory search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/memory/recall/{query}")
@@ -315,7 +315,7 @@ async def recall_with_graph(
 
     except Exception as e:
         logger.error(f"Recall failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/admin/jobs/status", response_model=JobStatusResponse)
@@ -333,7 +333,7 @@ async def get_job_status(
 
     except Exception as e:
         logger.error(f"Failed to get job status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/admin/jobs/trigger/{job_id}")
@@ -358,7 +358,7 @@ async def trigger_job(
         raise
     except Exception as e:
         logger.error(f"Failed to trigger job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 if __name__ == "__main__":

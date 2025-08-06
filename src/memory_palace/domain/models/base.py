@@ -1,3 +1,4 @@
+import contextlib
 from datetime import datetime
 from enum import Enum
 from uuid import UUID, uuid4
@@ -75,7 +76,7 @@ class GraphModel(BaseModel):
             record['id'] = UUID(record['id'])
         
         # Convert timestamp back to datetime
-        if 'timestamp' in record and isinstance(record['timestamp'], (int, float)):
+        if 'timestamp' in record and isinstance(record['timestamp'], int | float):
             record['timestamp'] = datetime.fromtimestamp(record['timestamp'])
         
         # Convert memory_type string back to enum
@@ -85,9 +86,7 @@ class GraphModel(BaseModel):
         # Convert other string UUIDs back to UUID objects
         for key, value in record.items():
             if key.endswith('_id') and isinstance(value, str):
-                try:
+                with contextlib.suppress(ValueError):
                     record[key] = UUID(value)
-                except ValueError:
-                    pass  # Not a valid UUID string
         
         return cls(**record)
