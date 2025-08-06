@@ -23,15 +23,16 @@ dependencies = [
     "logfire>=4.1.0",
     "ty>=0.0.1a16",
     "pydantic-settings>=2.10.1",
+    "opentelemetry-instrumentation-botocore>=0.57b0",
+    "opentelemetry-instrumentation-fastapi>=0.57b0",
+    "opentelemetry-instrumentation-httpx>=0.57b0",
+    "opentelemetry-instrumentation-requests>=0.57b0",
+    "opentelemetry-instrumentation-sqlite3>=0.57b0",
+    "opentelemetry-instrumentation-urllib>=0.57b0",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.26.0",
-    "ruff>=0.9.0",
-    "mypy>=1.13.0",
-]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.26.0", "ruff>=0.9.0", "mypy>=1.13.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -44,25 +45,25 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "F",    # pyflakes
-    "I",    # isort
-    "B",    # flake8-bugbear
-    "C4",   # flake8-comprehensions
-    "UP",   # pyupgrade
-    "ARG",  # flake8-unused-arguments
-    "SIM",  # flake8-simplify
-    "RUF",  # Ruff-specific rules
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "RUF", # Ruff-specific rules
 ]
 ignore = [
-    "B008",  # Do not perform function call in argument defaults
-    "E501",  # Line too long (handled by formatter)
+    "B008", # Do not perform function call in argument defaults
+    "E501", # Line too long (handled by formatter)
 ]
 fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]  # Allow unused imports in __init__
-"test_*.py" = ["ARG"]      # Allow unused arguments in tests
+"__init__.py" = ["F401"] # Allow unused imports in __init__
+"test_*.py" = ["ARG"]    # Allow unused arguments in tests
 
 [tool.ruff.lint.isort]
 known-first-party = ["memory_palace"]
@@ -83,19 +84,12 @@ extra-paths = ["src"]
 
 [tool.ty.src]
 include = ["src/**/*.py"]
-exclude = [
-    "__pycache__",
-    ".venv",
-    "build",
-    "dist",
-    "**/tests/**",
-]
+exclude = ["__pycache__", ".venv", "build", "dist", "**/tests/**"]
 
 [tool.ty.rules]
 # Start with warnings to ease into type checking
 possibly-unresolved-reference = "warn"
-possibly-unbound-variable = "warn"
-
+possibly-unresolved-attribute = "warn"
 [tool.ty.terminal]
 output-format = "full"
 error-on-warning = false
@@ -104,5 +98,3 @@ error-on-warning = false
 [[tool.ty.overrides]]
 include = ["src/memory_palace/infrastructure/neo4j/query_builder/example.py"]
 [tool.ty.overrides.rules]
-# Examples can have looser type checking
-possibly-unresolved-reference = "ignore"

@@ -18,8 +18,8 @@ from neo4j._async.work.result import AsyncResult
 if TYPE_CHECKING:
     from neo4j._data import Record
 
-from memory_palace.core.errors.base import ErrorLevel
-from memory_palace.core.errors.decorators import with_error_handling
+from memory_palace.core.base import ErrorLevel
+from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import (
     error,
     info,

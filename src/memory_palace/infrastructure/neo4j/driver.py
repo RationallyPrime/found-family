@@ -13,14 +13,14 @@ if TYPE_CHECKING:
     from neo4j._async.work.result import AsyncResult
     from neo4j._data import Record
 
-from memory_palace.core.config.settings import settings
-from memory_palace.core.errors.base import (
+from memory_palace.core import (
     ErrorCode,
     ErrorLevel,
     ServiceErrorDetails,
 )
-from memory_palace.core.errors.decorators import with_error_handling
-from memory_palace.core.errors.exceptions import ServiceError
+from memory_palace.core.config import settings
+from memory_palace.core.decorators import with_error_handling
+from memory_palace.core.errors import ServiceError
 from memory_palace.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,11 +63,18 @@ async def create_neo4j_driver(
     )
 
     # Create the driver
+    # Handle both SecretStr and plain string for password
+    password = (
+        settings.neo4j_password.get_secret_value()
+        if hasattr(settings.neo4j_password, 'get_secret_value')
+        else settings.neo4j_password
+    )
+    
     driver = AsyncGraphDatabase.driver(
         settings.neo4j_uri,
         auth=(
             settings.neo4j_user,
-            settings.neo4j_password.get_secret_value(),
+            password,
         ),
         max_connection_pool_size=pool_size,
         max_connection_lifetime=conn_lifetime,

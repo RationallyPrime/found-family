@@ -1,32 +1,28 @@
 """API dependencies."""
 
-from functools import lru_cache
+from fastapi import HTTPException
+from neo4j import AsyncDriver
 
-from memory_palace.core.config import settings
-from memory_palace.infrastructure.embeddings import VoyageEmbeddingService
-from memory_palace.infrastructure.neo4j.simple_driver import get_driver
+from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
 from memory_palace.services.memory_service import MemoryService
 
-
-@lru_cache
-def get_embedding_service() -> VoyageEmbeddingService:
-    """Get embedding service singleton."""
-    return VoyageEmbeddingService(api_key=settings.voyage_api_key)
+# These will be set by the main.py lifespan
+neo4j_driver: AsyncDriver | None = None
+embedding_service: VoyageEmbeddingService | None = None
 
 
-@lru_cache
-def get_neo4j_driver():
-    """Get Neo4j driver singleton."""
-    return get_driver(
-        uri=settings.neo4j_uri,
-        username=settings.neo4j_user,
-        password=settings.neo4j_password,
-    )
-
-
-def get_memory_service() -> MemoryService:
-    """Get memory service instance."""
+async def get_memory_service() -> MemoryService:
+    """Get memory service instance with per-request session."""
+    if neo4j_driver is None or embedding_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Services not initialized"
+        )
+    
+    # Create a new session for this request
+    session = neo4j_driver.session()
     return MemoryService(
-        neo4j_driver=get_neo4j_driver(),
-        embedding_service=get_embedding_service(),
+        session=session,
+        embeddings=embedding_service,
+        clusterer=None
     )

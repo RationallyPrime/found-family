@@ -7,47 +7,47 @@ from typing import Any, cast
 import voyageai
 from pydantic import ConfigDict, Field
 
+from memory_palace.core.base import ErrorLevel, ServiceErrorDetails
 from memory_palace.core.config import settings
-from memory_palace.core.errors.base import ErrorCode, ErrorLevel, ServiceErrorDetails
-from memory_palace.core.errors.decorators import with_error_handling
-from memory_palace.core.errors.exceptions import (
+from memory_palace.core.decorators import with_error_handling
+from memory_palace.core.errors import (
     AuthenticationError,
     ProcessingError,
     RateLimitError,
     TimeoutError,
 )
-from memory_palace.core.errors.patterns import ErrorPattern, PatternMatcher
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models import EmbeddingType
 
 # Settings imported at the module level
 logger = get_logger(__name__)
 
+# TODO: Add pattern matcher when patterns module is implemented
 # Initialize error pattern matcher
-pattern_matcher = PatternMatcher()
+# pattern_matcher = PatternMatcher()
 
 # Register embedding-specific error patterns
-pattern_matcher.register_pattern(
-    "model_load",
-    ErrorPattern(
-        error_type="EmbeddingError",
-        message_pattern=r"model.*not found|failed to load model",
-        code=ErrorCode.MODEL_INITIALIZATION_ERROR,
-        level=ErrorLevel.ERROR,
-        suggested_solution="Verify model availability and credentials",
-    ),
-)
+# pattern_matcher.register_pattern(
+#     "model_load",
+#     ErrorPattern(
+#         error_type="EmbeddingError",
+#         message_pattern=r"model.*not found|failed to load model",
+#         code=ErrorCode.MODEL_INITIALIZATION_ERROR,
+#         level=ErrorLevel.ERROR,
+#         suggested_solution="Verify model availability and credentials",
+#     ),
+# )
 
-pattern_matcher.register_pattern(
-    "rate_limit",
-    ErrorPattern(
-        error_type="RateLimitError",
-        message_pattern=r"rate limit|too many requests|quota exceeded",
-        code=ErrorCode.RATE_LIMITED,
-        level=ErrorLevel.WARNING,
-        suggested_solution="Implement backoff strategy or reduce request frequency",
-    ),
-)
+# pattern_matcher.register_pattern(
+#     "rate_limit",
+#     ErrorPattern(
+#         error_type="RateLimitError",
+#         message_pattern=r"rate limit|too many requests|quota exceeded",
+#         code=ErrorCode.RATE_LIMITED,
+#         level=ErrorLevel.WARNING,
+#         suggested_solution="Implement backoff strategy or reduce request frequency",
+#     ),
+# )
 
 
 class VoyageEmbeddingService:
@@ -83,7 +83,14 @@ class VoyageEmbeddingService:
         """
         # Settings imported at the module level
 
-        if not settings.voyage_api_key.get_secret_value():
+        # Handle both SecretStr and plain string for API key
+        api_key = (
+            settings.voyage_api_key.get_secret_value()
+            if hasattr(settings.voyage_api_key, 'get_secret_value')
+            else settings.voyage_api_key
+        )
+
+        if not api_key:
             details = ServiceErrorDetails(
                 source="VoyageEmbeddingService",
                 operation="initialization",
@@ -98,12 +105,12 @@ class VoyageEmbeddingService:
                 details=details,
             )
 
-        # Use the model from settings or the one provided
-        self.model = model or settings.voyage_code_model
+        # Use the model from settings or the one provided, or default to voyage-3-large
+        self.model = model or getattr(settings, 'voyage_code_model', 'voyage-3-large')
         self.default_embedding_type = default_embedding_type
 
         # Set the environment variable for voyageai to pick up
-        os.environ["VOYAGE_API_KEY"] = settings.voyage_api_key.get_secret_value()
+        os.environ["VOYAGE_API_KEY"] = api_key
 
         # Initialize the client which will use the environment variable
         self.client = voyageai.AsyncClient()
@@ -303,9 +310,11 @@ class VoyageEmbeddingService:
             "voyage-02": 1536,
             "voyage-large-2": 1536,
             "voyage-code-2": 1536,
+            "voyage-3-large": 1024,  # New model with 1024 dimensions
+            "voyage-3": 1024,
         }
 
-        return MODEL_DIMENSIONS.get(self.model, 1536)  # Default to 1536
+        return MODEL_DIMENSIONS.get(self.model, 1024)  # Default to 1024
 
     async def close(self) -> None:
         """Close the client connection."""

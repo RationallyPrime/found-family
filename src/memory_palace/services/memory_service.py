@@ -8,25 +8,29 @@ This module implements MP-002, MP-003, and MP-008 by providing:
 - Multi-stage recall with ontology boost
 """
 
+from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from memory_palace.core.base import ErrorLevel
+from memory_palace.core.decorators import error_context, with_error_handling
 from memory_palace.domain.models.base import MemoryType
 from memory_palace.domain.models.memories import (
-    UserUtterance,
     AssistantUtterance,
+    Memory,
     MemoryRelationship,
     Turn,
-    Memory,
+    UserUtterance,
 )
-from memory_palace.infrastructure.repositories.memory import GenericMemoryRepository
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
+from memory_palace.infrastructure.repositories.memory import GenericMemoryRepository
 
 if TYPE_CHECKING:
-    from memory_palace.services.embeddings import EmbeddingService
-    from memory_palace.services.clustering import ClusteringService
     from neo4j import AsyncSession
+
+    from memory_palace.services import ClusteringService, EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,7 @@ class MemoryService:
         self.memory_repo = GenericMemoryRepository[Memory](session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
     
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def remember_turn(
         self,
         user_content: str,
@@ -67,9 +72,8 @@ class MemoryService:
             logger.info(f"Storing conversation turn for conversation {conversation_id}")
             
             # Generate embeddings for both messages
-            embeddings = await self.embeddings.embed(
-                [user_content, assistant_content],
-                input_type="document"
+            embeddings = await self.embeddings.embed_batch(
+                [user_content, assistant_content]
             )
             
             # Create memory objects with discriminated union types
@@ -152,7 +156,7 @@ class MemoryService:
                 .where("other.embedding IS NOT NULL")
                 .with_clause(
                     "other",
-                    f"gds.similarity.cosine(other.embedding, $embedding) AS similarity"
+                    "gds.similarity.cosine(other.embedding, $embedding) AS similarity"
                 )
                 .where(f"similarity > {similarity_threshold}")
                 .return_clause("other", "similarity")
@@ -242,6 +246,7 @@ class MemoryService:
         else:
             await self.assistant_repo.remember(memory)
     
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def recall_with_graph(
         self,
         query: str,
@@ -258,8 +263,8 @@ class MemoryService:
         
         try:
             # Stage 1: Generate query embedding and initial vector search
-            query_embedding = await self.embeddings.embed([query], input_type="query")
-            embedding = query_embedding[0]
+            query_embedding = await self.embeddings.embed_text(query)
+            embedding = query_embedding
             
             # Get broad candidate set using similarity search
             candidates = await self.memory_repo.recall_any(
@@ -388,6 +393,7 @@ class MemoryService:
             logger.error(f"Graph expansion failed: {e}")
             return []
     
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=True)
     async def search_memories(
         self,
         query: str | None = None,
@@ -414,8 +420,8 @@ class MemoryService:
         # If we have a query, use similarity search
         similarity_search = None
         if query:
-            query_embedding = await self.embeddings.embed([query], input_type="query")
-            similarity_search = (query_embedding[0], 0.7)
+            query_embedding = await self.embeddings.embed_text(query)
+            similarity_search = (query_embedding, 0.7)
         
         # Use repository for type-safe querying
         results = await self.memory_repo.recall_any(
@@ -443,6 +449,7 @@ class MemoryService:
             limit=limit
         )
     
+    @error_context(error_level=ErrorLevel.INFO)
     async def get_memory_relationships(
         self,
         memory_id: UUID

@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 # Context variable to store request-scoped logging context
 # Use None as default to avoid mutable default value issues
-_log_context: ContextVar[dict[str, Any] | None] = ContextVar("log_context", default=None)
+_log_context: ContextVar[dict[str, Any]] = ContextVar("log_context", default=None)
 
 
 def get_log_context() -> dict[str, Any]:
