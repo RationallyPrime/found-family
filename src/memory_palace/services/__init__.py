@@ -37,4 +37,4 @@ class ClusteringService(Protocol):
         ...
 
 
-__all__ = ["EmbeddingService", "ClusteringService"]
+__all__ = ["ClusteringService", "EmbeddingService"]

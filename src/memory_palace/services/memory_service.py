@@ -43,9 +43,9 @@ class MemoryService:
     
     def __init__(
         self,
-        session: "AsyncSession",
-        embeddings: "EmbeddingService",
-        clusterer: "ClusteringService" | None = None,
+        session: AsyncSession,
+        embeddings: EmbeddingService,
+        clusterer: ClusteringService | None = None,
     ):
         self.session = session
         self.embeddings = embeddings

@@ -1,10 +1,9 @@
 """OAuth 2.1 authentication for remote MCP server."""
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -51,7 +50,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create JWT access token."""
     to_encode = data.copy()
     if expires_delta:
@@ -97,7 +96,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     raise credentials_exception
 
 
-def authenticate_user(email: str, password: str) -> Optional[dict]:
+def authenticate_user(email: str, password: str) -> dict | None:
     """Authenticate user credentials."""
     user = USERS_DB.get(email)
     if not user or not verify_password(password, user["hashed_password"]):

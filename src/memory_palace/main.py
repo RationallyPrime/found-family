@@ -4,7 +4,6 @@ This module implements MP-005 by integrating DreamJobOrchestrator into the
 application lifecycle for automated memory management.
 """
 
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from uuid import UUID
@@ -14,19 +13,19 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
+from neo4j import AsyncDriver
 from pydantic import BaseModel
 
-from memory_palace.core.base import ApplicationError, ErrorLevel
-from memory_palace.core.decorators import with_error_handling
-from memory_palace.core.logging import get_logger, setup_logging
-from memory_palace.infrastructure.neo4j.driver import Neo4jQuery, create_neo4j_driver
-from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
-from memory_palace.services.dream_jobs import DreamJobOrchestrator
-from memory_palace.services.memory_service import MemoryService
-from memory_palace.api.endpoints import memory
 from memory_palace.api import dependencies
 from memory_palace.api.dependencies import get_memory_service
-from neo4j import AsyncDriver
+from memory_palace.api.endpoints import memory
+from memory_palace.core.base import ErrorLevel
+from memory_palace.core.decorators import with_error_handling
+from memory_palace.core.logging import get_logger, setup_logging
+from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
+from memory_palace.infrastructure.neo4j.driver import Neo4jQuery, create_neo4j_driver
+from memory_palace.services.dream_jobs import DreamJobOrchestrator
+from memory_palace.services.memory_service import MemoryService
 
 # Configure Logfire and logging
 logfire.configure(service_name="memory-palace")

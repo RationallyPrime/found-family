@@ -4,12 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from memory_palace.core.config import settings
 from memory_palace.api import router
 
 # Import OAuth and MCP components
 from memory_palace.auth.oauth_endpoints import oauth_router
-from memory_palace.mcp.remote_server import handle_mcp_sse, handle_mcp_http, MCPRequest, MCPResponse
+from memory_palace.mcp.remote_server import MCPRequest, MCPResponse, handle_mcp_http, handle_mcp_sse
 
 
 @asynccontextmanager

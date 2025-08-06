@@ -1,13 +1,13 @@
 """Memory API endpoints."""
 
 import traceback
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from memory_palace.api.dependencies import get_memory_service, neo4j_driver
+from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.logging import get_logger
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
 from memory_palace.services.memory_service import MemoryService

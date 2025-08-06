@@ -25,12 +25,12 @@ from memory_palace.infrastructure.neo4j.query_builder.interfaces import (
 from memory_palace.infrastructure.neo4j.query_builder.patterns import (
     PatternBuilder,
 )
+from memory_palace.infrastructure.neo4j.query_builder.specification_support import (
+    SpecificationSupport,
+)
 from memory_palace.infrastructure.neo4j.query_builder.state import (
     ClauseType,
     CypherQueryState,
-)
-from memory_palace.infrastructure.neo4j.query_builder.specification_support import (
-    SpecificationSupport,
 )
 
 logger: FilteringBoundLogger = get_logger(name=__name__)

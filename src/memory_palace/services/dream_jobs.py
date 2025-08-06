@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -138,7 +137,7 @@ class DreamJobOrchestrator:
                 
                 # Update memories with assignments
                 assigned_count = 0
-                for memory, topic_id in zip(unassigned, topic_ids):
+                for memory, topic_id in zip(unassigned, topic_ids, strict=False):
                     if topic_id != -1:  # Not noise
                         update_builder = CypherQueryBuilder()
                         update_query = (
@@ -191,7 +190,7 @@ class DreamJobOrchestrator:
                 
                 # Update all memories with new topic assignments
                 updated_count = 0
-                for memory, new_topic_id in zip(all_memories, new_topic_ids):
+                for memory, new_topic_id in zip(all_memories, new_topic_ids, strict=False):
                     if memory['current_topic'] != new_topic_id:
                         update_builder = CypherQueryBuilder()
                         update_query = (

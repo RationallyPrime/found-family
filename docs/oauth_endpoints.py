@@ -2,7 +2,7 @@
 from datetime import timedelta
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -185,7 +185,8 @@ async def token(
             
         try:
             from jose import jwt
-            from .oauth_auth import OAUTH_SECRET_KEY, OAUTH_ALGORITHM
+
+            from .oauth_auth import OAUTH_ALGORITHM, OAUTH_SECRET_KEY
             
             payload = jwt.decode(refresh_token, OAUTH_SECRET_KEY, algorithms=[OAUTH_ALGORITHM])
             user_id = payload.get("sub")

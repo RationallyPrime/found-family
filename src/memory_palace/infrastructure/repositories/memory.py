@@ -1,13 +1,11 @@
 import logging
-from typing import TypeVar, Any, Generic, Type
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from neo4j import AsyncSession
 
 from memory_palace.domain.models.base import GraphModel
 from memory_palace.domain.models.memories import Memory
-from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
-from memory_palace.infrastructure.neo4j.query_builder.specification_support import SpecificationSupport
 
 logger = logging.getLogger(__name__)
 
@@ -16,47 +14,47 @@ T = TypeVar("T", bound=GraphModel)
 
 class GenericMemoryRepository(Generic[T]):
     """Generic repository for all memory types using discriminated unions and type safety."""
-    
+
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def remember(self, memory: T) -> T:
         """Store any type of memory with full type safety."""
         try:
             labels = memory.labels()
             labels_str = ":".join(labels)
             properties = memory.to_neo4j_properties()
-            
+
             logger.debug(f"Storing {memory.__class__.__name__} with labels: {labels}")
-            
+
             # Use MERGE to handle both create and update scenarios
             query = f"""
             MERGE (m:{labels_str} {{id: $id}})
             SET m += $properties
             RETURN m
             """
-            
+
             result = await self.session.run(
                 query,
                 id=str(memory.id),
                 properties=properties
             )
-            
+
             # Verify the memory was stored
             record = await result.single()
             if not record:
                 raise RuntimeError(f"Failed to store memory {memory.id}")
-            
+
             logger.debug(f"Successfully stored memory {memory.id}")
             return memory
-            
+
         except Exception as e:
             logger.error(f"Failed to store memory {memory.id}: {e}")
             raise
-    
+
     async def recall(
         self,
-        memory_type: Type[T],
+        memory_type: type[T],
         filters: dict[str, Any] | None = None,
         similarity_search: tuple[list[float], float] | None = None,
         limit: int = 100,
@@ -67,19 +65,19 @@ class GenericMemoryRepository(Generic[T]):
             # Get labels from the memory type class
             labels = memory_type.labels()
             labels_str = ":".join(labels)
-            
+
             if similarity_search:
                 embedding, threshold = similarity_search
                 # Manual cosine similarity for Neo4j Community Edition
                 query = f"""
                 MATCH (m:{labels_str})
                 WHERE m.embedding IS NOT NULL
-                WITH m, 
-                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) | 
+                WITH m,
+                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) |
                             dot + m.embedding[i] * $embedding[i]) AS dotProduct,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) | 
+                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) |
                             sum + m.embedding[i] * m.embedding[i])) AS norm1,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) | 
+                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) |
                             sum + $embedding[i] * $embedding[i])) AS norm2
                 WITH m, dotProduct / (norm1 * norm2) AS similarity
                 WHERE similarity > $threshold
@@ -89,8 +87,8 @@ class GenericMemoryRepository(Generic[T]):
                 SKIP $offset LIMIT $limit
                 """
                 params = {
-                    "embedding": embedding, 
-                    "threshold": threshold, 
+                    "embedding": embedding,
+                    "threshold": threshold,
                     "offset": offset,
                     "limit": limit,
                     **(filters or {})
@@ -104,9 +102,9 @@ class GenericMemoryRepository(Generic[T]):
                 SKIP $offset LIMIT $limit
                 """
                 params = {"offset": offset, "limit": limit, **(filters or {})}
-            
+
             result = await self.session.run(query, **params)
-            
+
             memories = []
             async for record in result:
                 try:
@@ -115,40 +113,40 @@ class GenericMemoryRepository(Generic[T]):
                 except Exception as e:
                     logger.warning(f"Failed to deserialize memory record: {e}")
                     continue
-            
+
             logger.debug(f"Recalled {len(memories)} memories of type {memory_type.__name__}")
             return memories
-            
+
         except Exception as e:
             logger.error(f"Failed to recall memories of type {memory_type.__name__}: {e}")
             return []
-    
-    async def get_by_id(self, memory_id: UUID, memory_type: Type[T]) -> T | None:
+
+    async def get_by_id(self, memory_id: UUID, memory_type: type[T]) -> T | None:
         """Get a specific memory by ID with type safety."""
         try:
             labels = memory_type.labels()
             labels_str = ":".join(labels)
-            
+
             query = f"""
             MATCH (m:{labels_str} {{id: $id}})
             RETURN m
             """
-            
+
             result = await self.session.run(query, id=str(memory_id))
             record = await result.single()
-            
+
             if record:
                 return self._record_to_memory(record["m"], memory_type)
             return None
-            
+
         except Exception as e:
             logger.error(f"Failed to get memory {memory_id}: {e}")
             return None
-    
+
     async def connect(
-        self, 
-        source_id: UUID, 
-        target_id: UUID, 
+        self,
+        source_id: UUID,
+        target_id: UUID,
         relationship_type: str,
         properties: dict[str, Any] | None = None
     ):
@@ -161,24 +159,24 @@ class GenericMemoryRepository(Generic[T]):
             SET r += $properties
             RETURN r
             """.replace("{rel_type}", relationship_type)
-            
+
             await self.session.run(
                 query,
                 source_id=str(source_id),
                 target_id=str(target_id),
                 properties=properties or {}
             )
-            
+
             logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
-            
+
         except Exception as e:
             logger.error(f"Failed to create relationship {source_id} -> {target_id}: {e}")
             raise
-    
+
     async def disconnect(
-        self, 
-        source_id: UUID, 
-        target_id: UUID, 
+        self,
+        source_id: UUID,
+        target_id: UUID,
         relationship_type: str | None = None
     ):
         """Remove relationship(s) between two memories."""
@@ -196,22 +194,22 @@ class GenericMemoryRepository(Generic[T]):
                 DELETE r
                 RETURN count(r) as deleted
                 """
-            
+
             result = await self.session.run(
                 query,
                 source_id=str(source_id),
                 target_id=str(target_id)
             )
-            
+
             record = await result.single()
             deleted_count = record["deleted"] if record else 0
             logger.debug(f"Deleted {deleted_count} relationships between {source_id} and {target_id}")
-            
+
         except Exception as e:
             logger.error(f"Failed to delete relationships {source_id} -> {target_id}: {e}")
             raise
-    
-    async def delete(self, memory_id: UUID, memory_type: Type[T] | None = None):
+
+    async def delete(self, memory_id: UUID, memory_type: type[T] | None = None):
         """Delete a memory and all its relationships."""
         try:
             if memory_type:
@@ -227,49 +225,49 @@ class GenericMemoryRepository(Generic[T]):
                 MATCH (m:Memory {id: $id})
                 DETACH DELETE m
                 """
-            
+
             await self.session.run(query, id=str(memory_id))
             logger.debug(f"Deleted memory {memory_id}")
-            
+
         except Exception as e:
             logger.error(f"Failed to delete memory {memory_id}: {e}")
             raise
-    
+
     def _build_where_clause(self, filters: dict[str, Any] | None) -> str:
         """Build WHERE clause from filters."""
         if not filters:
             return ""
-        
+
         conditions = []
         for key, value in filters.items():
             if isinstance(value, str):
                 conditions.append(f"m.{key} = '{value}'")
-            elif isinstance(value, (int, float)):
+            elif isinstance(value, int | float):
                 conditions.append(f"m.{key} = {value}")
             elif isinstance(value, list):
                 str_values = [f"'{v}'" if isinstance(v, str) else str(v) for v in value]
                 conditions.append(f"m.{key} IN [{', '.join(str_values)}]")
-        
+
         return f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    
+
     def _build_filter_clause(self, filters: dict[str, Any] | None) -> str:
         """Build filter clause for similarity search (assumes WHERE already used)."""
         if not filters:
             return ""
-        
+
         conditions = []
         for key, value in filters.items():
             if isinstance(value, str):
                 conditions.append(f"m.{key} = '{value}'")
-            elif isinstance(value, (int, float)):
+            elif isinstance(value, int | float):
                 conditions.append(f"m.{key} = {value}")
             elif isinstance(value, list):
                 str_values = [f"'{v}'" if isinstance(v, str) else str(v) for v in value]
                 conditions.append(f"m.{key} IN [{', '.join(str_values)}]")
-        
+
         return f"AND {' AND '.join(conditions)}" if conditions else ""
-    
-    def _record_to_memory(self, record: dict, memory_type: Type[T]) -> T:
+
+    def _record_to_memory(self, record: dict, memory_type: type[T]) -> T:
         """Convert Neo4j record to memory object."""
         try:
             return memory_type.from_neo4j_record(record)
@@ -281,7 +279,7 @@ class GenericMemoryRepository(Generic[T]):
 
 class MemoryRepository(GenericMemoryRepository[Memory]):
     """Specialized repository for the Memory discriminated union."""
-    
+
     async def recall_any(
         self,
         filters: dict[str, Any] | None = None,
@@ -294,24 +292,24 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
             if similarity_search:
                 embedding, threshold = similarity_search
                 # Manual cosine similarity for Neo4j Community Edition
-                query = """
+                query = f"""
                 MATCH (m:Memory)
                 WHERE m.embedding IS NOT NULL
-                WITH m, 
-                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) | 
+                WITH m,
+                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) |
                             dot + m.embedding[i] * $embedding[i]) AS dotProduct,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) | 
+                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) |
                             sum + m.embedding[i] * m.embedding[i])) AS norm1,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) | 
+                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) |
                             sum + $embedding[i] * $embedding[i])) AS norm2
                 WITH m, dotProduct / (norm1 * norm2) AS similarity
                 WHERE similarity > $threshold
-                {filter_clause}
+                {self._build_filter_clause(filters)}
                 RETURN m, similarity
                 ORDER BY similarity DESC
                 SKIP $offset LIMIT $limit
-                """.format(filter_clause=self._build_filter_clause(filters))
-                
+                """
+
                 params = {
                     "embedding": embedding,
                     "threshold": threshold,
@@ -328,9 +326,9 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                 SKIP $offset LIMIT $limit
                 """
                 params = {"offset": offset, "limit": limit, **(filters or {})}
-            
+
             result = await self.session.run(query, **params)
-            
+
             memories = []
             async for record in result:
                 try:
@@ -344,10 +342,10 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                 except Exception as e:
                     logger.warning(f"Failed to deserialize memory record: {e}")
                     continue
-            
+
             logger.debug(f"Recalled {len(memories)} memories of mixed types")
             return memories
-            
+
         except Exception as e:
             logger.error(f"Failed to recall mixed memory types: {e}")
             return []

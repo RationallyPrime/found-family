@@ -85,16 +85,3 @@ extra-paths = ["src"]
 [tool.ty.src]
 include = ["src/**/*.py"]
 exclude = ["__pycache__", ".venv", "build", "dist", "**/tests/**"]
-
-[tool.ty.rules]
-# Start with warnings to ease into type checking
-possibly-unresolved-reference = "warn"
-possibly-unresolved-attribute = "warn"
-[tool.ty.terminal]
-output-format = "full"
-error-on-warning = false
-
-# Override for specific files
-[[tool.ty.overrides]]
-include = ["src/memory_palace/infrastructure/neo4j/query_builder/example.py"]
-[tool.ty.overrides.rules]

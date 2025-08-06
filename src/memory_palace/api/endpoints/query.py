@@ -1,11 +1,10 @@
 """Query builder endpoint for direct Cypher query construction and execution."""
 
-import json
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.logging import get_logger
@@ -111,7 +110,7 @@ async def build_and_execute_query(
         # Add similarity search if requested
         if request.include_similarity and request.query_embedding:
             # Add WITH clause for similarity calculation
-            similarity_calc = f"""
+            similarity_calc = """
             m, 
             reduce(dot = 0.0, i IN range(0, size($embedding)-1) | 
                    dot + m.embedding[i] * $embedding[i]) AS dotProduct,

@@ -1,31 +1,31 @@
 """Remote MCP Server implementation with OAuth authentication."""
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, Request
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.services.memory_service import MemoryService
+
 from .oauth_auth import User, get_current_user
 
 
 class MCPRequest(BaseModel):
     """MCP protocol request."""
     jsonrpc: str = "2.0"
-    id: Optional[str] = None
+    id: str | None = None
     method: str
-    params: Optional[Dict[str, Any]] = None
+    params: dict[str, Any] | None = None
 
 
 class MCPResponse(BaseModel):
     """MCP protocol response."""
     jsonrpc: str = "2.0"
-    id: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
+    id: str | None = None
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class RemoteMCPServer:

@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+
 from memory_palace.domain.specifications.base import Specification
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ class SpecificationSupport:
                 elif op == "lt":
                     conditions.append(f"m.{field} < {value}")
                 elif op == "contains":
-                    conditions.append(f"m.{field} CONTAINS {repr(str(value))}")
+                    conditions.append(f"m.{field} CONTAINS {str(value)!r}")
                 # Add more operators as needed
             elif key == "$or":
                 # Handle OR conditions
@@ -69,7 +70,7 @@ class SpecificationSupport:
             else:
                 # Simple equality - handle string values with proper quoting
                 if isinstance(value, str):
-                    conditions.append(f"m.{key} = {repr(value)}")
+                    conditions.append(f"m.{key} = {value!r}")
                 else:
                     conditions.append(f"m.{key} = {value}")
         
@@ -82,7 +83,7 @@ class SpecificationSupport:
         conditions = []
         for key, value in filters.items():
             if isinstance(value, str):
-                conditions.append(f"m.{key} = {repr(value)}")
+                conditions.append(f"m.{key} = {value!r}")
             else:
                 conditions.append(f"m.{key} = {value}")
         return " AND ".join(conditions) if conditions else "true"
