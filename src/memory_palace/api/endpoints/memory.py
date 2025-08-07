@@ -113,15 +113,23 @@ async def recall_memories(
         )
 
         # Convert to dict for response
-        message_dicts = [
-            {
+        message_dicts = []
+        for msg in messages:
+            msg_dict = {
                 "id": str(msg.id),
-                "role": msg.role.value,
                 "content": msg.content,
                 "timestamp": msg.timestamp.isoformat(),
+                "memory_type": msg.memory_type.value,
             }
-            for msg in messages
-        ]
+            # Add role based on memory type
+            if msg.memory_type.value == "user_utterance":
+                msg_dict["role"] = "user"
+            elif msg.memory_type.value == "assistant_utterance":
+                msg_dict["role"] = "assistant"
+            else:
+                msg_dict["role"] = msg.memory_type.value
+            
+            message_dicts.append(msg_dict)
 
         logger.info("Search completed", extra={
             "result_count": len(messages)

@@ -10,12 +10,13 @@ This module implements MP-002, MP-003, and MP-008 by providing:
 
 from __future__ import annotations
 
-import logging
+# Standard logging replaced with Logfire logging
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from memory_palace.core.base import ErrorLevel
 from memory_palace.core.decorators import error_context, with_error_handling
+from memory_palace.core.logging import get_logger
 from memory_palace.domain.models.base import MemoryType
 from memory_palace.domain.models.memories import (
     AssistantUtterance,
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 
     from memory_palace.services import ClusteringService, EmbeddingService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MemoryService:
