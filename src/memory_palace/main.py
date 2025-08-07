@@ -15,7 +15,7 @@ from fastapi_mcp import FastApiMCP
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
-from memory_palace.api.endpoints import memory
+from memory_palace.api.endpoints import admin, core, memory
 from memory_palace.api.oauth import router as oauth_router
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
@@ -49,14 +49,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         async for driver in create_neo4j_driver():
             neo4j_driver = driver
             break  # We get the driver from the generator
-        
+
         if neo4j_driver is None:
             raise RuntimeError("Failed to initialize Neo4j driver")
-        
+
         # Initialize embedding service
         logger.info("🧮 Initializing Embedding Service...")
         embedding_service = VoyageEmbeddingService()
-        
+
         # Set global dependencies for API endpoints
         dependencies.neo4j_driver = neo4j_driver
         dependencies.embedding_service = embedding_service
@@ -124,7 +124,6 @@ app.add_middleware(
 )
 
 # Import endpoint routers
-from memory_palace.api.endpoints import admin, core
 
 # Mount API routers
 app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
