@@ -126,6 +126,10 @@ app.add_middleware(
 # Mount API routers
 app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
 
+# Include OAuth for Claude.ai authentication
+from memory_palace.api.oauth import router as oauth_router
+app.include_router(oauth_router)
+
 # Add MCP support
 mcp = FastApiMCP(app)
 mcp.mount()  # Creates MCP server at /mcp

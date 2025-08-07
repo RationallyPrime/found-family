@@ -53,6 +53,12 @@ voyage_api_key:
   secret: true
   default: ""
 
+claude_api_key:
+  type: str
+  help: Create a secure key for Claude to connect from claude.ai (random string recommended)
+  secret: true
+  default: "{{ 'mp_' + friend_name.lower().replace(' ', '_') + '_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)) }}"
+
 # Files to generate
 _templates:
   - .env.jinja
