@@ -4,7 +4,7 @@ This module provides utilities for building node and relationship patterns
 in a type-safe manner.
 """
 
-from typing import Any, Literal, LiteralString, cast
+from typing import Any, Literal, LiteralString
 
 
 class NodePattern:
@@ -66,7 +66,7 @@ class NodePattern:
         # Close the pattern
         pattern_parts.append(")")
 
-        return cast("LiteralString", "".join(pattern_parts))
+        return "".join(pattern_parts)  # type: LiteralString
 
 
 class RelationshipPattern:
@@ -163,7 +163,7 @@ class RelationshipPattern:
         # Close the pattern
         pattern_parts.append("]")
 
-        return cast("LiteralString", "".join(pattern_parts))
+        return "".join(pattern_parts)  # type: LiteralString
 
 
 class PatternBuilder:
@@ -230,17 +230,17 @@ class PatternBuilder:
 
         # Handle different directions
         if direction == "->":
-            self._pattern_parts.append(cast("LiteralString", "-"))
+            self._pattern_parts.append("-")
             self._pattern_parts.append(rel.build())
-            self._pattern_parts.append(cast("LiteralString", "->"))
+            self._pattern_parts.append("->")
         elif direction == "<-":
-            self._pattern_parts.append(cast("LiteralString", "<-"))
+            self._pattern_parts.append("<-")
             self._pattern_parts.append(rel.build())
-            self._pattern_parts.append(cast("LiteralString", "-"))
+            self._pattern_parts.append("-")
         else:  # direction == "-"
-            self._pattern_parts.append(cast("LiteralString", "-"))
+            self._pattern_parts.append("-")
             self._pattern_parts.append(rel.build())
-            self._pattern_parts.append(cast("LiteralString", "-"))
+            self._pattern_parts.append("-")
 
         return self
 

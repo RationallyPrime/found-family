@@ -84,11 +84,9 @@ class VoyageEmbeddingService:
         # Settings imported at the module level
 
         # Handle both SecretStr and plain string for API key
-        api_key = (
-            settings.voyage_api_key.get_secret_value()
-            if hasattr(settings.voyage_api_key, 'get_secret_value')
-            else settings.voyage_api_key
-        )
+        api_key = settings.voyage_api_key
+        if hasattr(api_key, 'get_secret_value') and callable(getattr(api_key, 'get_secret_value')):
+            api_key = api_key.get_secret_value()  # type: ignore
 
         if not api_key:
             details = ServiceErrorDetails(
@@ -227,29 +225,57 @@ class VoyageEmbeddingService:
     ) -> ProcessingError | RateLimitError | TimeoutError | AuthenticationError:
         """Map errors to our exception types."""
         error_msg = str(e).lower()
+        # Create proper ServiceErrorDetails for different error types
+        if "rate limit" in error_msg:
+            details = ServiceErrorDetails(
+                source="VoyageEmbeddingService",
+                operation="embed_batch",
+                service_name="Voyage AI",
+                endpoint="/embeddings",
+                status_code=429,  # Rate limit status code
+                request_id=None,
+                latency_ms=None,
+            )
+            return RateLimitError(
+                message="Rate limit exceeded for embeddings API",
+                details=details,
+            )
+        if "timeout" in error_msg or "connection" in error_msg:
+            details = ServiceErrorDetails(
+                source="VoyageEmbeddingService",
+                operation="embed_batch",
+                service_name="Voyage AI",
+                endpoint="/embeddings",
+                status_code=408,  # Timeout status code
+                request_id=None,
+                latency_ms=None,
+            )
+            return TimeoutError(
+                message="Embeddings API request timed out",
+                details=details,
+            )
+        if "auth" in error_msg or "api key" in error_msg:
+            details = ServiceErrorDetails(
+                source="VoyageEmbeddingService",
+                operation="embed_batch",
+                service_name="Voyage AI",
+                endpoint="/embeddings",
+                status_code=401,  # Unauthorized status code
+                request_id=None,
+                latency_ms=None,
+            )
+            return AuthenticationError(
+                message="Authentication failed for embeddings API",
+                details=details,
+            )
+
+        # Default to ProcessingError with dict details
         error_context: dict[str, Any] = {
             "batch_index": batch_index,
             "batch_size": len(texts),
             "model": model,
             "original_error": str(e),
         }
-
-        if "rate limit" in error_msg:
-            return RateLimitError(
-                message="Rate limit exceeded for embeddings API",
-                details=error_context,
-            )
-        if "timeout" in error_msg or "connection" in error_msg:
-            return TimeoutError(
-                message="Embeddings API request timed out",
-                details=error_context,
-            )
-        if "auth" in error_msg or "api key" in error_msg:
-            return AuthenticationError(
-                message="Authentication failed for embeddings API",
-                details=error_context,
-            )
-
         return ProcessingError(
             message=f"Failed to generate embeddings: {e!s}",
             details=error_context,

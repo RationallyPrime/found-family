@@ -272,7 +272,7 @@ async def execute_query_builder(
         logger.debug(f"Parameters: {list(all_params.keys())}")
         
         # Execute using the session from memory_service
-        result = await memory_service.session.run(cypher_query, **all_params)
+        result = await memory_service.run_query(cypher_query, **all_params)
         records = await result.data()
         
         logger.info(f"Query returned {len(records)} results")
@@ -312,7 +312,7 @@ async def execute_raw_query(
     try:
         logger.warning(f"Executing raw Cypher query: {query}")
         
-        result = await memory_service.session.run(query, **(parameters or {}))
+        result = await memory_service.run_query(query, **(parameters or {}))
         records = await result.data()
         
         return {

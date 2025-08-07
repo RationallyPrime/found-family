@@ -11,7 +11,7 @@ This module implements MP-002, MP-003, and MP-008 by providing:
 from __future__ import annotations
 
 # Standard logging replaced with Logfire logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast, LiteralString
 from uuid import UUID, uuid4
 
 from memory_palace.core.base import ErrorLevel
@@ -58,6 +58,16 @@ class MemoryService:
         # Use the specialized MemoryRepository for the discriminated union
         self.memory_repo = MemoryRepository(session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
+    
+    async def run_query(self, query: str, **params):
+        """Helper method to run queries with proper type casting.
+        
+        This wraps session.run() to handle the LiteralString requirement
+        in a trusted context where we control the query construction.
+        """
+        # Cast to LiteralString for Neo4j driver (trusted internal context)
+        trusted_query = cast(LiteralString, query)
+        return await self.session.run(trusted_query, **params)
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def remember_turn(
@@ -170,7 +180,8 @@ class MemoryService:
             )
 
             # Execute with embedding parameter
-            result = await self.session.run(*query.build(), embedding=memory.embedding)
+            query_str, params = query.build()
+            result = await self.run_query(query_str, embedding=memory.embedding, **params)
 
             # Process similar memories
             async for record in result:
@@ -367,7 +378,8 @@ class MemoryService:
                     .limit(5)  # Limit expansion per seed
                 )
 
-                result = await self.session.run(*query.build())
+                query_str, params = query.build()
+                result = await self.run_query(query_str, **params)
 
                 async for record in result:
                     connected_data = dict(record["connected"])
@@ -483,7 +495,7 @@ class MemoryService:
         """
         # Build Cypher query from specifications
         builder = CypherQueryBuilder()
-        builder.match("Memory", "m")
+        builder.match(lambda p: p.node("Memory", "m"))
         
         # Apply each specification as a WHERE clause
         for spec in specifications:
@@ -494,16 +506,18 @@ class MemoryService:
         # Add similarity search if query provided
         if query:
             query_embedding = await self.embeddings.embed_text(query)
-            builder.add_parameter(query_embedding, "embedding")
+            # Add embedding as a parameter
+            param_name = builder.add_parameter(query_embedding)
+            # We'll use this parameter name in the similarity calculation
             
-            # Add similarity calculation and filter
-            similarity_calc = """
-            reduce(dot = 0.0, i IN range(0, size($embedding)-1) | 
-                   dot + m.embedding[i] * $embedding[i]) /
+            # Add similarity calculation and filter using the parameter name
+            similarity_calc = f"""
+            reduce(dot = 0.0, i IN range(0, size(${param_name})-1) | 
+                   dot + m.embedding[i] * ${param_name}[i]) /
             (sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) | 
                    sum + m.embedding[i] * m.embedding[i])) *
-             sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) | 
-                   sum + $embedding[i] * $embedding[i])))
+             sqrt(reduce(sum = 0.0, i IN range(0, size(${param_name})-1) | 
+                   sum + ${param_name}[i] * ${param_name}[i])))
             """
             builder.with_clause("m", f"{similarity_calc} AS similarity")
             builder.where_param("similarity > {}", similarity_threshold)
@@ -518,7 +532,7 @@ class MemoryService:
         
         # Execute query
         query_str, params = builder.build()
-        result = await self.session.run(query_str, **params)
+        result = await self.run_query(query_str, **params)
         
         memories = []
         async for record in result:

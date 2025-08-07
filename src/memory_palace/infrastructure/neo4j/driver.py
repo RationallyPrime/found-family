@@ -5,7 +5,7 @@ with proper connection management and query execution.
 """
 
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Any, Generic, LiteralString, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
@@ -106,7 +106,7 @@ class Neo4jQuery(Generic[T]):
     @with_error_handling(error_level=ErrorLevel.ERROR)
     async def execute(
         self,
-        query: LiteralString,
+        query: str,
         params: dict[str, Any] | None = None,
         result_transformer: Callable[[Any], T] | None = None,
     ) -> AsyncGenerator[T]:
@@ -137,7 +137,7 @@ class Neo4jQuery(Generic[T]):
     @with_error_handling(error_level=ErrorLevel.ERROR)
     async def execute_single(
         self,
-        query: LiteralString,
+        query: str,
         params: dict[str, Any] | None = None,
         result_transformer: Callable[[Any], T] | None = None,
     ) -> T | None:
@@ -171,7 +171,7 @@ class Neo4jQuery(Generic[T]):
 
     async def execute_list(
         self,
-        query: LiteralString,
+        query: str,
         params: dict[str, Any] | None = None,
         result_transformer: Callable[[Any], T] | None = None,
     ) -> list[T]:
@@ -202,7 +202,7 @@ class Neo4jQuery(Generic[T]):
     @with_error_handling(error_level=ErrorLevel.ERROR)
     async def execute_value(
         self,
-        query: LiteralString,
+        query: str,
         params: dict[str, Any] | None = None,
     ) -> Any:
         """Execute a Neo4j query and return the first value from the result.

@@ -5,6 +5,8 @@ that form the foundation of AI continuity of experience.
 """
 
 from datetime import datetime
+
+from memory_palace.domain.models.utils import utc_now
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -61,7 +63,7 @@ class EnhancedMemoryChunk(BaseModel):
     id: UUID = Field(..., description="Permanent anchor for this memory")
     role: MemoryRole = Field(..., description="Who created this memory")
     content: str = Field(..., description="The actual memory content")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     
     # Semantic layer
     embedding: list[float] = Field(..., description="Vector embedding for semantic search")
@@ -103,7 +105,7 @@ class EnhancedMemoryChunk(BaseModel):
         if not self.last_accessed:
             return self.salience
         
-        days_elapsed = (datetime.utcnow() - self.last_accessed).days
+        days_elapsed = (utc_now() - self.last_accessed).days
         decay_factor = (1 - self.decay_rate) ** days_elapsed
         return max(0.05, self.salience * decay_factor)  # Floor at 0.05
 
@@ -118,7 +120,7 @@ class MemoryRelationship(BaseModel):
     # Relationship properties
     strength: float = Field(1.0, ge=0.0, le=1.0, description="Relationship strength")
     confidence: float = Field(1.0, ge=0.0, le=1.0, description="Confidence in this relationship")
-    discovered_at: datetime = Field(default_factory=datetime.utcnow)
+    discovered_at: datetime = Field(default_factory=utc_now)
     
     # Context
     evidence: str | None = Field(None, description="Why this relationship exists")
@@ -138,8 +140,8 @@ class TopicCluster(BaseModel):
     centroid: list[float] | None = Field(None, description="Cluster centroid in embedding space")
     
     # Evolution tracking
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    last_updated: datetime = Field(default_factory=utc_now)
     parent_cluster_id: int | None = Field(None, description="Previous cluster this evolved from")
     
     # Semantic description
@@ -162,8 +164,8 @@ class ConversationContext(BaseModel):
     """Represents a conversation with continuity."""
     
     id: UUID = Field(..., description="Conversation ID")
-    started_at: datetime = Field(default_factory=datetime.utcnow)
-    last_active: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utc_now)
+    last_active: datetime = Field(default_factory=utc_now)
     
     # Conversation state
     is_active: bool = Field(True)
@@ -197,7 +199,7 @@ class OntologyNode(BaseModel):
     child_paths: list[list[str]] = Field(default_factory=list)
     
     # Evolution
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     
     def is_ancestor_of(self, other: "OntologyNode") -> bool:

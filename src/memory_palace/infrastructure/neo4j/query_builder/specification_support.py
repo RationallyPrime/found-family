@@ -8,22 +8,22 @@ if TYPE_CHECKING:
 
 class SpecificationSupport:
     """Mixin to integrate specifications with query builder."""
-    
+
     def where_spec(self: "CypherQueryBuilder", spec: Specification) -> "CypherQueryBuilder":
         """Apply a specification as a WHERE clause."""
         # Check if spec has Cypher support
-        if hasattr(spec, 'to_cypher'):
-            cypher = spec.to_cypher()
+        if hasattr(spec, 'to_cypher') and callable(getattr(spec, 'to_cypher')):  # noqa: B009
+            cypher = spec.to_cypher()  # type: ignore
             return self.where(cypher)
-        
+
         # Fallback to filter dict conversion
         filters = spec.to_filter()
         return self._apply_filters(filters)
-    
+
     def _apply_filters(self: "CypherQueryBuilder", filters: dict) -> "CypherQueryBuilder":
         """Convert filter dict to WHERE clauses."""
         conditions = []
-        
+
         for key, value in filters.items():
             if "__" in key:
                 # Handle operators like 'salience__gte'
@@ -33,10 +33,7 @@ class SpecificationSupport:
                 elif op == "lte":
                     conditions.append(f"m.{field} <= {value}")
                 elif op == "in":
-                    if isinstance(value, list | tuple):
-                        value_str = str(list(value))
-                    else:
-                        value_str = f"[{value}]"
+                    value_str = str(list(value)) if isinstance(value, list | tuple) else f"[{value}]"
                     conditions.append(f"m.{field} IN {value_str}")
                 elif op == "ne":
                     conditions.append(f"m.{field} <> {value}")
@@ -64,7 +61,7 @@ class SpecificationSupport:
                             or_conditions.append(f"m.{or_key} = {repr(or_value) if isinstance(or_value, str) else or_value}")
                     if or_conditions:
                         or_parts.append(" AND ".join(or_conditions))
-                
+
                 if or_parts:
                     conditions.append(f"({' OR '.join(or_parts)})")
             else:
@@ -73,11 +70,11 @@ class SpecificationSupport:
                     conditions.append(f"m.{key} = {value!r}")
                 else:
                     conditions.append(f"m.{key} = {value}")
-        
+
         if conditions:
             return self.where(" AND ".join(conditions))
         return self
-    
+
     def _filters_to_cypher(self: "CypherQueryBuilder", filters: dict) -> str:
         """Helper to convert a single filter dict to Cypher condition."""
         conditions = []

@@ -1,6 +1,8 @@
 """Analysis models adapted from Automining for Memory Palace."""
 
 from datetime import datetime
+
+from memory_palace.domain.models.utils import utc_now
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -72,7 +74,7 @@ class MemoryAnalysis(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     memory_id: UUID  # ID of the memory/conversation analyzed
     analysis_type: AnalysisType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
 
     # Analysis results (populated based on type)
     sentiment: SentimentScore | None = None

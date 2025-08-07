@@ -34,27 +34,27 @@ async def get_current_claude(request: Request) -> TokenData:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing authentication")
-    
+
     token = auth_header.replace("Bearer ", "")
     token_data = verify_token(token)
-    
+
     if not token_data:
         raise HTTPException(status_code=401, detail="Invalid authentication")
-    
+
     # Verify it's Claude
     if token_data.client_id != "claude":
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     return token_data
 
 
 class MCPServer:
     """MCP server handling Claude's memory operations."""
-    
+
     def __init__(self, memory_service: MemoryService):
         self.memory_service = memory_service
         self.tools = self._register_tools()
-    
+
     def _register_tools(self) -> dict:
         """Register available MCP tools."""
         return {
@@ -121,7 +121,7 @@ class MCPServer:
                 }
             }
         }
-    
+
     async def handle_request(self, request: MCPRequest) -> MCPResponse:
         """Handle an MCP request."""
         try:
@@ -147,7 +147,7 @@ class MCPServer:
                     "message": str(e)
                 }
             )
-    
+
     async def _handle_initialize(self, request: MCPRequest) -> MCPResponse:
         """Handle initialization request."""
         return MCPResponse(
@@ -166,7 +166,7 @@ class MCPServer:
                 }
             }
         )
-    
+
     async def _handle_list_tools(self, request: MCPRequest) -> MCPResponse:
         """List available tools."""
         tools = [
@@ -177,7 +177,7 @@ class MCPServer:
             id=request.id,
             result={"tools": tools}
         )
-    
+
     async def _handle_tool_call(self, request: MCPRequest) -> MCPResponse:
         """Execute a tool call."""
         if not request.params:
@@ -185,10 +185,10 @@ class MCPServer:
                 id=request.id,
                 error={"code": -32602, "message": "Invalid params"}
             )
-        
+
         tool_name = request.params.get("name")
         arguments = request.params.get("arguments", {})
-        
+
         if tool_name == "memory-palace/remember":
             result = await self._remember(arguments)
         elif tool_name == "memory-palace/recall":
@@ -200,12 +200,12 @@ class MCPServer:
                 id=request.id,
                 error={"code": -32602, "message": f"Unknown tool: {tool_name}"}
             )
-        
+
         return MCPResponse(
             id=request.id,
             result={"content": [{"type": "text", "text": json.dumps(result)}]}
         )
-    
+
     async def _remember(self, args: dict) -> dict:
         """Store a memory."""
         friend_memory, claude_memory = await self.memory_service.remember_turn(
@@ -213,14 +213,14 @@ class MCPServer:
             assistant_content=args["claude_content"],
             conversation_id=UUID(args["conversation_id"]) if args.get("conversation_id") else None
         )
-        
+
         return {
             "status": "success",
             "friend_memory_id": str(friend_memory.id),
             "claude_memory_id": str(claude_memory.id),
             "message": "Memory stored successfully"
         }
-    
+
     async def _recall(self, args: dict) -> dict:
         """Recall memories."""
         memories = await self.memory_service.search_memories(
@@ -228,7 +228,7 @@ class MCPServer:
             limit=args.get("limit", 10),
             similarity_threshold=args.get("threshold", 0.7)
         )
-        
+
         return {
             "memories": [
                 {
@@ -241,14 +241,14 @@ class MCPServer:
             ],
             "count": len(memories)
         }
-    
+
     async def _get_context(self, args: dict) -> dict:
         """Get conversation context."""
         memories = await self.memory_service.get_conversation_history(
             conversation_id=UUID(args["conversation_id"]),
             limit=args.get("limit", 20)
         )
-        
+
         return {
             "conversation_id": args["conversation_id"],
             "turns": [
@@ -266,14 +266,14 @@ class MCPServer:
 
 async def create_mcp_sse_stream(
     memory_service: MemoryService,
-    claude: TokenData
+    claude: TokenData  # noqa: ARG001
 ) -> AsyncGenerator[str]:
     """Create Server-Sent Events stream for MCP."""
-    mcp_server = MCPServer(memory_service)
-    
+    mcp_server = MCPServer(memory_service)  # noqa: F841
+
     # Send initial connection event
     yield f"data: {json.dumps({'type': 'connection', 'status': 'connected'})}\n\n"
-    
+
     # Keep connection alive with heartbeat
     import asyncio
     while True:

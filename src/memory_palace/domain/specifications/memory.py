@@ -5,6 +5,8 @@ the ontology and relationships between memories.
 """
 
 from datetime import datetime, timedelta
+
+from memory_palace.domain.models.utils import utc_now
 from typing import Any
 from uuid import UUID
 
@@ -65,7 +67,7 @@ class RecentMemorySpecification(BaseSpecification):
     """Find memories within a time window."""
     
     def __init__(self, days: int = 7, hours: int = 0):
-        self.cutoff = datetime.utcnow() - timedelta(days=days, hours=hours)
+        self.cutoff = utc_now() - timedelta(days=days, hours=hours)
     
     def is_satisfied_by(self, entity: Any) -> bool:
         if not hasattr(entity, 'timestamp'):
@@ -248,7 +250,7 @@ class DecayingMemorySpecification(BaseSpecification):
     """Find memories that are decaying (haven't been accessed recently)."""
     
     def __init__(self, days_since_access: int = 30, max_salience: float = 0.3):
-        self.cutoff = datetime.utcnow() - timedelta(days=days_since_access)
+        self.cutoff = utc_now() - timedelta(days=days_since_access)
         self.max_salience = max_salience
     
     def is_satisfied_by(self, entity: Any) -> bool:

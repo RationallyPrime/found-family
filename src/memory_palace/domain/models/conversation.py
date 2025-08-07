@@ -1,6 +1,8 @@
 """Conversation models adapted from Automining for Memory Palace."""
 
 from datetime import datetime
+
+from memory_palace.domain.models.utils import utc_now
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -31,7 +33,7 @@ class Message(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     role: MessageRole
     content: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     content_type: ContentType = ContentType.TEXT
     embedding: list[float] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -54,7 +56,7 @@ class ConversationTurn(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     user_message: Message
     assistant_message: Message
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     topic_id: int | None = None
     ontology_path: list[str] = Field(default_factory=list)
     salience: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -66,7 +68,7 @@ class Conversation(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     title: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime | None = None
     turns: list[ConversationTurn] = Field(default_factory=list)
     summary: str | None = None

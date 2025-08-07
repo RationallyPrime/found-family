@@ -41,8 +41,15 @@ class ErrorHandler:
         # Include rich structured data if it's an ApplicationError
         if isinstance(error_context.error, ApplicationError):
             response["error_code"] = error_context.error.code.value
-            details_dict = error_context.error.details.model_dump()
-            response["details"] = details_dict
+            # Handle different types of details
+            if hasattr(error_context.error.details, 'model_dump'):
+                details_dict = error_context.error.details.model_dump()  # type: ignore
+            elif isinstance(error_context.error.details, dict):
+                details_dict = error_context.error.details
+            else:
+                details_dict = None
+            if details_dict:
+                response["details"] = details_dict
 
         # Add suggested solution if available
         if additional_context and additional_context.get("suggested_solution"):

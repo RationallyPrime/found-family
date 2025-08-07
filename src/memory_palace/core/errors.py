@@ -22,7 +22,7 @@ class ServiceError(ApplicationError):
 class AuthenticationError(ApplicationError):
     """Authentication-related errors."""
     
-    def __init__(self, message: str, details: dict | None = None):
+    def __init__(self, message: str, details: ServiceErrorDetails | dict | None = None):
         super().__init__(
             message=message,
             code=ErrorCode.AUTHENTICATION_FAILED,
@@ -34,7 +34,7 @@ class AuthenticationError(ApplicationError):
 class ProcessingError(ApplicationError):
     """General processing errors."""
     
-    def __init__(self, message: str, details: dict | None = None):
+    def __init__(self, message: str, details: ServiceErrorDetails | dict | None = None):
         super().__init__(
             message=message,
             code=ErrorCode.PROCESSING_FAILED,
@@ -58,7 +58,7 @@ class RateLimitError(ApplicationError):
 class TimeoutError(ApplicationError):
     """Timeout errors."""
     
-    def __init__(self, message: str, details: dict | None = None):
+    def __init__(self, message: str, details: ServiceErrorDetails | dict | None = None):
         super().__init__(
             message=message,
             code=ErrorCode.TIMEOUT,

@@ -1,5 +1,7 @@
 import contextlib
 from datetime import datetime
+
+from memory_palace.domain.models.utils import utc_now
 from enum import Enum
 from uuid import UUID, uuid4
 
@@ -28,7 +30,7 @@ class GraphModel(BaseModel):
     
     id: UUID = Field(default_factory=uuid4)
     memory_type: MemoryType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     
     @classmethod
     def labels(cls) -> list[str]:
