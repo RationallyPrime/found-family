@@ -78,6 +78,7 @@ class MemoryService:
         detect_relationships: bool = True,
         auto_classify: bool = True,
         similarity_threshold: float = 0.85,
+        salience: float | None = None,  # Explicit importance (0.0-1.0)
     ) -> Turn:
         """Store a complete conversation turn with relationship detection and classification.
 
@@ -92,12 +93,15 @@ class MemoryService:
             )
 
             # Create memory objects with discriminated union types
+            # Use provided salience or default to 0.5 (normal importance)
+            memory_salience = salience if salience is not None else 0.5
+            
             friend_memory = FriendUtterance(
                 id=uuid4(),
                 content=user_content,
                 embedding=embeddings[0],
                 conversation_id=conversation_id,
-                salience=0.5  # Base salience
+                salience=memory_salience
             )
 
             claude_memory = ClaudeUtterance(
@@ -105,7 +109,7 @@ class MemoryService:
                 content=assistant_content,
                 embedding=embeddings[1],
                 conversation_id=conversation_id,
-                salience=0.5
+                salience=memory_salience
             )
 
             # Auto-classify into topics if enabled and clusterer available

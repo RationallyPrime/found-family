@@ -27,6 +27,14 @@ class StoreTurnRequest(BaseModel):
 
     # Incremental ontology support
     ontology_path: list[str] | None = None
+    
+    # Memory importance/salience (0.0-1.0 scale)
+    # Guidelines:
+    #   0.1-0.3: Routine, ephemeral ("what's the weather?")
+    #   0.4-0.6: Normal conversation, useful but not critical
+    #   0.7-0.8: Important information (preferences, decisions, learning moments)
+    #   0.9-1.0: Critical/foundational (core beliefs, major events, key relationships)
+    # If not provided, system auto-assigns based on content analysis
     salience: float | None = None
 
 
@@ -45,7 +53,7 @@ class SearchRequest(BaseModel):
     threshold: float = 0.7
 
     # Enhanced search filters
-    min_salience: float | None = None
+    min_salience: float | None = None  # Only return memories above this importance (0.0-1.0)
     topic_ids: list[int] | None = None
     ontology_path: list[str] | None = None
 
@@ -74,7 +82,7 @@ async def remember_turn(
             user_content=request.user_content,
             assistant_content=request.assistant_content,
             conversation_id=request.conversation_id,
-            # remember_turn doesn't take metadata, ontology_path, or salience directly
+            salience=request.salience,  # Pass through the importance rating
         )
 
         # Use the assistant memory ID as the turn ID since that's the "response" part
