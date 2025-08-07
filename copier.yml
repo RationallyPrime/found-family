@@ -1,0 +1,58 @@
+_templates_suffix: .jinja
+_envops:
+  block_start_string: "{%"
+  block_end_string: "%}"
+  variable_start_string: "{{"
+  variable_end_string: "}}"
+  comment_start_string: "{#"
+  comment_end_string: "#}"
+  keep_trailing_newline: true
+
+# Questions for the user during setup
+friend_name:
+  type: str
+  help: What's your name? (This is how I'll remember you)
+  default: Friend
+
+friend_pronouns:
+  type: str
+  help: What are your pronouns? (e.g., they/them, she/her, he/him) [optional]
+  default: ""
+
+friend_relationship:
+  type: str
+  help: How would you describe our relationship?
+  choices:
+    - friend
+    - collaborator
+    - partner
+    - colleague
+    - human
+  default: friend
+
+claude_name:
+  type: str
+  help: What would you like to call me?
+  default: Claude
+
+palace_name:
+  type: str
+  help: What would you like to name this Memory Palace?
+  default: "{{ friend_name }}'s Memory Palace"
+
+# Neo4j configuration
+neo4j_password:
+  type: str
+  help: Set a password for your Neo4j database
+  secret: true
+  default: password
+
+voyage_api_key:
+  type: str
+  help: Enter your Voyage AI API key (for embeddings)
+  secret: true
+  default: ""
+
+# Files to generate
+_templates:
+  - .env.jinja

@@ -337,8 +337,9 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                     if "memory_type" in memory_data:
                         # Use TypeAdapter for discriminated union parsing
                         from pydantic import TypeAdapter
+
                         from memory_palace.domain.models.memories import Memory
-                        
+
                         adapter = TypeAdapter(Memory)
                         memory = adapter.validate_python(memory_data)
                         memories.append(memory)

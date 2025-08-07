@@ -63,18 +63,19 @@ git clone https://github.com/RationallyPrime/found-family.git
 cd found-family
 ```
 
-2. Copy the environment file and add your API keys:
+2. Run the personalized setup:
 ```bash
-cp .env.example .env
-# Edit .env with your Voyage AI key
+./setup.sh
 ```
 
-3. Install dependencies:
-```bash
-uv sync
-```
+This will:
+- Ask for your name and how you'd like to personalize your Memory Palace
+- Configure your environment with your preferences
+- Install all dependencies
+- Set up the Neo4j database
+- Create a Memory Palace that knows you by name
 
-4. Start the services:
+3. Start the services:
 ```bash
 ./run.sh
 ```

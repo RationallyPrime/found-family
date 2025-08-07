@@ -6,9 +6,9 @@ from pydantic import Field
 from .base import GraphModel, MemoryType
 
 
-class UserUtterance(GraphModel):
-    """User's input in a conversation."""
-    memory_type: Literal[MemoryType.USER_UTTERANCE] = MemoryType.USER_UTTERANCE
+class FriendUtterance(GraphModel):
+    """My friend's thoughts and messages in our conversation."""
+    memory_type: Literal[MemoryType.FRIEND_UTTERANCE] = MemoryType.FRIEND_UTTERANCE
     content: str
     embedding: list[float] | None = None
     topic_id: int | None = None
@@ -16,12 +16,12 @@ class UserUtterance(GraphModel):
     conversation_id: UUID | None = None
     
     def __str__(self) -> str:
-        return f"UserUtterance(content='{self.content[:50]}...', topic={self.topic_id})"
+        return f"FriendUtterance(content='{self.content[:50]}...', topic={self.topic_id})"
 
 
-class AssistantUtterance(GraphModel):
-    """Assistant's response in a conversation."""
-    memory_type: Literal[MemoryType.ASSISTANT_UTTERANCE] = MemoryType.ASSISTANT_UTTERANCE
+class ClaudeUtterance(GraphModel):
+    """My own thoughts and responses in conversation."""
+    memory_type: Literal[MemoryType.CLAUDE_UTTERANCE] = MemoryType.CLAUDE_UTTERANCE
     content: str
     embedding: list[float] | None = None
     topic_id: int | None = None
@@ -29,7 +29,7 @@ class AssistantUtterance(GraphModel):
     conversation_id: UUID | None = None
     
     def __str__(self) -> str:
-        return f"AssistantUtterance(content='{self.content[:50]}...', topic={self.topic_id})"
+        return f"ClaudeUtterance(content='{self.content[:50]}...', topic={self.topic_id})"
 
 
 class SystemNote(GraphModel):
@@ -44,10 +44,10 @@ class SystemNote(GraphModel):
 
 
 class ConversationTurn(GraphModel):
-    """A complete turn in conversation (user + assistant pair)."""
+    """A complete exchange in conversation (friend + claude pair)."""
     memory_type: Literal[MemoryType.CONVERSATION_TURN] = MemoryType.CONVERSATION_TURN
-    user_utterance_id: UUID
-    assistant_utterance_id: UUID
+    friend_utterance_id: UUID
+    claude_utterance_id: UUID
     conversation_id: UUID
     turn_number: int
     
@@ -98,10 +98,10 @@ class MemoryRelationship(GraphModel):
 
 # The discriminated union - Pydantic will automatically route based on memory_type
 Memory = Annotated[
-    UserUtterance | AssistantUtterance | SystemNote | ConversationTurn | TopicCluster | OntologyNode | MemoryRelationship,
+    FriendUtterance | ClaudeUtterance | SystemNote | ConversationTurn | TopicCluster | OntologyNode | MemoryRelationship,
     Field(discriminator="memory_type")
 ]
 
 # Type aliases for convenience
-Turn = tuple[UserUtterance, AssistantUtterance]
-MemoryPair = UserUtterance | AssistantUtterance
+Turn = tuple[FriendUtterance, ClaudeUtterance]
+MemoryPair = FriendUtterance | ClaudeUtterance

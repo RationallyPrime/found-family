@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from memory_palace.api.dependencies import get_memory_service
+from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
 from memory_palace.services.memory_service import MemoryService
@@ -121,11 +122,15 @@ async def recall_memories(
                 "timestamp": msg.timestamp.isoformat(),
                 "memory_type": msg.memory_type.value,
             }
-            # Add role based on memory type
-            if msg.memory_type.value == "user_utterance":
-                msg_dict["role"] = "user"
-            elif msg.memory_type.value == "assistant_utterance":
-                msg_dict["role"] = "assistant"
+            # Add role based on memory type with personalized names
+            if msg.memory_type.value == "friend_utterance":
+                msg_dict["role"] = settings.friend_name
+            elif msg.memory_type.value == "claude_utterance":
+                msg_dict["role"] = settings.claude_name
+            elif msg.memory_type.value == "user_utterance":  # Legacy support
+                msg_dict["role"] = settings.friend_name
+            elif msg.memory_type.value == "assistant_utterance":  # Legacy support
+                msg_dict["role"] = settings.claude_name
             else:
                 msg_dict["role"] = msg.memory_type.value
             
@@ -224,7 +229,7 @@ async def execute_query_builder(
                        sum + $query_embedding[i] * $query_embedding[i]))) AS similarity
                 """
             )
-            builder.where(f"similarity > {request.similarity_threshold}")
+            builder.where_param("similarity > {}", request.similarity_threshold)
         
         # Add relationship traversal if requested
         if request.include_relationships:

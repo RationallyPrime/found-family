@@ -19,11 +19,11 @@ from memory_palace.core.decorators import error_context, with_error_handling
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models.base import MemoryType
 from memory_palace.domain.models.memories import (
-    AssistantUtterance,
+    ClaudeUtterance,
+    FriendUtterance,
     Memory,
     MemoryRelationship,
     Turn,
-    UserUtterance,
 )
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
 from memory_palace.infrastructure.repositories.memory import (
@@ -53,8 +53,8 @@ class MemoryService:
         self.clusterer = clusterer
         
         # Create typed repositories
-        self.user_repo = GenericMemoryRepository[UserUtterance](session)
-        self.assistant_repo = GenericMemoryRepository[AssistantUtterance](session)
+        self.friend_repo = GenericMemoryRepository[FriendUtterance](session)
+        self.claude_repo = GenericMemoryRepository[ClaudeUtterance](session)
         # Use the specialized MemoryRepository for the discriminated union
         self.memory_repo = MemoryRepository(session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
@@ -82,7 +82,7 @@ class MemoryService:
             )
             
             # Create memory objects with discriminated union types
-            user_memory = UserUtterance(
+            friend_memory = FriendUtterance(
                 id=uuid4(),
                 content=user_content,
                 embedding=embeddings[0],
@@ -90,7 +90,7 @@ class MemoryService:
                 salience=0.5  # Base salience
             )
             
-            assistant_memory = AssistantUtterance(
+            claude_memory = ClaudeUtterance(
                 id=uuid4(),
                 content=assistant_content,
                 embedding=embeddings[1],
@@ -104,16 +104,16 @@ class MemoryService:
                 topic_ids = await self.clusterer.predict([embeddings[0], embeddings[1]])
                 user_memory.topic_id = topic_ids[0] if topic_ids[0] != -1 else None
                 assistant_memory.topic_id = topic_ids[1] if topic_ids[1] != -1 else None
-                logger.debug(f"Assigned topics: user={user_memory.topic_id}, assistant={assistant_memory.topic_id}")
+                logger.debug(f"Assigned topics: friend={friend_memory.topic_id}, claude={claude_memory.topic_id}")
             
             # Store memories using typed repositories
-            await self.user_repo.remember(user_memory)
-            await self.assistant_repo.remember(assistant_memory)
+            await self.friend_repo.remember(friend_memory)
+            await self.claude_repo.remember(claude_memory)
             
             # Create FOLLOWED_BY relationship between user and assistant
-            await self.user_repo.connect(
-                user_memory.id,
-                assistant_memory.id,
+            await self.friend_repo.connect(
+                friend_memory.id,
+                claude_memory.id,
                 "FOLLOWED_BY",
                 {"strength": 1.0, "sequence": "conversation_turn"}
             )
@@ -121,23 +121,23 @@ class MemoryService:
             # Detect relationships with existing memories if enabled
             if detect_relationships:
                 logger.debug("Detecting semantic relationships")
-                user_relationships = await self._detect_and_create_relationships(
-                    user_memory, similarity_threshold
+                friend_relationships = await self._detect_and_create_relationships(
+                    friend_memory, similarity_threshold
                 )
-                assistant_relationships = await self._detect_and_create_relationships(
-                    assistant_memory, similarity_threshold
+                claude_relationships = await self._detect_and_create_relationships(
+                    claude_memory, similarity_threshold
                 )
                 
                 # Update salience based on relationship count and strength
                 await self._update_salience_from_relationships(
-                    user_memory, len(user_relationships)
+                    friend_memory, len(friend_relationships)
                 )
                 await self._update_salience_from_relationships(
-                    assistant_memory, len(assistant_relationships)
+                    claude_memory, len(claude_relationships)
                 )
             
-            logger.info(f"Successfully stored turn: user={user_memory.id}, assistant={assistant_memory.id}")
-            return (user_memory, assistant_memory)
+            logger.info(f"Successfully stored turn: friend={friend_memory.id}, claude={claude_memory.id}")
+            return (friend_memory, claude_memory)
             
         except Exception as e:
             logger.error(f"Failed to store conversation turn: {e}", exc_info=True)
@@ -145,7 +145,7 @@ class MemoryService:
     
     async def _detect_and_create_relationships(
         self,
-        memory: UserUtterance | AssistantUtterance,
+        memory: FriendUtterance | ClaudeUtterance,
         similarity_threshold: float = 0.85
     ) -> list[MemoryRelationship]:
         """Find and create semantic relationships using the query builder and specifications."""
@@ -157,13 +157,13 @@ class MemoryService:
             query = (
                 builder
                 .match(lambda p: p.node("Memory", "other"))
-                .where(f"other.id <> '{memory.id}'")
+                .where_param("other.id <> {}", str(memory.id))
                 .where("other.embedding IS NOT NULL")
                 .with_clause(
                     "other",
                     "gds.similarity.cosine(other.embedding, $embedding) AS similarity"
                 )
-                .where(f"similarity > {similarity_threshold}")
+                .where_param("similarity > {}", similarity_threshold)
                 .return_clause("other", "similarity")
                 .order_by("similarity DESC")
                 .limit(5)
@@ -236,7 +236,7 @@ class MemoryService:
     
     async def _update_salience_from_relationships(
         self,
-        memory: UserUtterance | AssistantUtterance,
+        memory: FriendUtterance | ClaudeUtterance,
         relationship_count: int
     ):
         """Update memory salience based on relationship count and strength."""
@@ -246,10 +246,10 @@ class MemoryService:
         
         # Update using repository
         memory.salience = max_salience
-        if isinstance(memory, UserUtterance):
-            await self.user_repo.remember(memory)  # This will update existing
+        if isinstance(memory, FriendUtterance):
+            await self.friend_repo.remember(memory)  # This will update existing
         else:
-            await self.assistant_repo.remember(memory)
+            await self.claude_repo.remember(memory)
     
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def recall_with_graph(

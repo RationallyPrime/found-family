@@ -10,8 +10,8 @@ class MemoryType(str, Enum):
     """Registry of all memory types in the palace."""
     
     # Core memories
-    USER_UTTERANCE = "user_utterance"
-    ASSISTANT_UTTERANCE = "assistant_utterance"
+    FRIEND_UTTERANCE = "friend_utterance"  # The human I'm talking with
+    CLAUDE_UTTERANCE = "claude_utterance"  # My own thoughts and responses
     SYSTEM_NOTE = "system_note"
     
     # Derived memories
