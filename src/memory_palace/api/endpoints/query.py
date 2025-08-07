@@ -122,22 +122,20 @@ async def build_and_execute_query(
             """
             builder.with_clause(similarity_calc)
             builder.with_clause("m, dotProduct / (norm1 * norm2) AS similarity")
-            builder.where(f"similarity > {request.similarity_threshold}")
+            builder.where_param("similarity > {}", request.similarity_threshold)
         
         # Add specification-based filters
         if request.min_salience is not None:
-            builder.where(f"m.salience >= {request.min_salience}")
+            builder.where_param("m.salience >= {}", request.min_salience)
         
         if request.topic_ids:
-            topic_list = ', '.join(str(t) for t in request.topic_ids)
-            builder.where(f"m.topic_id IN [{topic_list}]")
+            builder.where_param("m.topic_id IN {}", request.topic_ids)
         
         if request.conversation_id:
-            builder.where(f"m.conversation_id = '{request.conversation_id}'")
+            builder.where_param("m.conversation_id = {}", request.conversation_id)
         
         if request.memory_types:
-            type_list = ', '.join(f"'{t}'" for t in request.memory_types)
-            builder.where(f"m.memory_type IN [{type_list}]")
+            builder.where_param("m.memory_type IN {}", request.memory_types)
         
         # Add WITH clause if specified
         if request.with_clause:

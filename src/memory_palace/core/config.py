@@ -9,8 +9,8 @@ class FriendConfig(BaseModel):
     """Configuration for the friend using the Memory Palace."""
 
     name: str = Field(default="Friend", description="The name of the person I'm talking with")
-    pronouns: str | None = Field(default=None, description="Preferred pronouns (e.g., 'they/them', 'she/her', 'he/him')")  # noqa: E501
-    relationship: str = Field(default="friend", description="How we relate (e.g., 'friend', 'collaborator', 'partner')")  # noqa: E501
+    pronouns: str | None = Field(default=None, description="Preferred pronouns (e.g., 'they/them', 'she/her', 'he/him')")
+    relationship: str = Field(default="friend", description="How we relate (e.g., 'friend', 'collaborator', 'partner')")
 
     @property
     def possessive(self) -> str:
@@ -39,11 +39,11 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # Personalization
-    friend_name: str = Field(default="Hákon", description="Name of the person using this Memory Palace")  # noqa: E501
+    friend_name: str = Field(default="Hákon", description="Name of the person using this Memory Palace")
     friend_pronouns: str | None = Field(default=None, description="Friend's pronouns")
     friend_relationship: str = Field(default="friend", description="Our relationship")
     claude_name: str = Field(default="Claude", description="My name in this context")
-    palace_name: str = Field(default="Found Family Memory Palace", description="Name of this memory palace instance")  # noqa: E501
+    palace_name: str = Field(default="Found Family Memory Palace", description="Name of this memory palace instance")
 
     model_config = SettingsConfigDict(
         env_file=".env",

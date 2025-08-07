@@ -4,8 +4,6 @@ This package provides a type-safe, fluent interface for building Cypher queries.
 """
 
 from .builder import CypherQueryBuilder
-from .builder_metrics import MetricsCypherQueryBuilder
-from .metrics import MetricsCollector, Neo4jQueryMetrics, collect_metrics
 from .pagination import PaginationMixin
 from .patterns import NodePattern, PatternBuilder, RelationshipPattern
 from .state import ClauseType, CypherQueryState
@@ -16,10 +14,6 @@ __all__ = [
     # Base query builder
     "CypherQueryBuilder",
     "CypherQueryState",
-    "MetricsCollector",
-    # Metrics
-    "MetricsCypherQueryBuilder",
-    "Neo4jQueryMetrics",
     # Patterns
     "NodePattern",
     # Mixins
@@ -27,5 +21,4 @@ __all__ = [
     "PatternBuilder",
     "RelationshipPattern",
     "VectorSearchMixin",
-    "collect_metrics",
 ]

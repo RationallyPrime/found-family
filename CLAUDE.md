@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Memory Palace is a Neo4j-backed persistence system for AI continuity of experience. It provides semantic memory storage and retrieval using graph relationships and vector embeddings.
 
-claude mcp add logfire -- uvx logfire-mcp@latest --read-token=pylf_v1_us_B6PKcVKRd4YGFBM3f0nBvLWTR3N6p9kDD2L946GQFFRF
-
 ## Development Commands
 
 ### Starting the Application

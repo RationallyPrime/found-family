@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from neo4j._data import Record
 
 from memory_palace.core import (
-    ErrorCode,
     ErrorLevel,
     ServiceErrorDetails,
 )
@@ -63,12 +62,8 @@ async def create_neo4j_driver(
     )
 
     # Create the driver
-    # Handle both SecretStr and plain string for password
-    password = (
-        settings.neo4j_password.get_secret_value()
-        if hasattr(settings.neo4j_password, 'get_secret_value')
-        else settings.neo4j_password
-    )
+    # Password is a plain string in config
+    password = settings.neo4j_password
     
     driver = AsyncGraphDatabase.driver(
         settings.neo4j_uri,
@@ -318,7 +313,6 @@ class Neo4jQuery(Generic[T]):
                             )
                             raise ServiceError(
                                 message=f"Batch operation failed: {e!s}",
-                                code=ErrorCode.DB_QUERY,
                                 details=details,
                             ) from e
 

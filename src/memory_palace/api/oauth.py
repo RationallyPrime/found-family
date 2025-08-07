@@ -3,14 +3,13 @@
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/oauth", tags=["oauth"])
+router = APIRouter(tags=["oauth"])
 
 # OAuth configuration
 CLIENT_ID = "claude"
@@ -26,7 +25,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
-    refresh_token: Optional[str] = None
+    refresh_token: str | None = None
 
 
 @router.get("/.well-known/oauth-authorization-server")
@@ -46,15 +45,15 @@ async def oauth_metadata(request: Request):
     }
 
 
-@router.get("/authorize")
+@router.get("/oauth/authorize")
 async def authorize(
     response_type: str,
     client_id: str,
     redirect_uri: str,
     scope: str = "read write",
-    state: Optional[str] = None,
-    code_challenge: Optional[str] = None,
-    code_challenge_method: Optional[str] = None,
+    state: str | None = None,
+    code_challenge: str | None = None,
+    code_challenge_method: str | None = None,
 ):
     """OAuth authorization endpoint."""
     
@@ -87,13 +86,13 @@ async def authorize(
     return RedirectResponse(url=redirect_url)
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post("/oauth/token", response_model=TokenResponse)
 async def token(
     grant_type: str = Form(...),
-    code: Optional[str] = Form(None),
+    code: str | None = Form(None),
     client_id: str = Form(...),
     client_secret: str = Form(...),
-    refresh_token: Optional[str] = Form(None),
+    refresh_token: str | None = Form(None),
 ):
     """OAuth token endpoint."""
     
@@ -141,7 +140,7 @@ async def token(
     )
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:

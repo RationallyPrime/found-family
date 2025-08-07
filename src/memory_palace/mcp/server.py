@@ -1,14 +1,13 @@
 """MCP Server implementation for Claude.ai integration."""
 
 import json
-from typing import Any, AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from memory_palace.api.dependencies import get_memory_service
 from memory_palace.auth.oauth import TokenData, verify_token
 from memory_palace.services.memory_service import MemoryService
 
@@ -16,17 +15,17 @@ from memory_palace.services.memory_service import MemoryService
 class MCPRequest(BaseModel):
     """MCP protocol request."""
     jsonrpc: str = "2.0"
-    id: Optional[str] = None
+    id: str | None = None
     method: str
-    params: Optional[dict[str, Any]] = None
+    params: dict[str, Any] | None = None
 
 
 class MCPResponse(BaseModel):
     """MCP protocol response."""
     jsonrpc: str = "2.0"
-    id: Optional[str] = None
-    result: Optional[dict[str, Any]] = None
-    error: Optional[dict[str, Any]] = None
+    id: str | None = None
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 async def get_current_claude(request: Request) -> TokenData:
@@ -268,7 +267,7 @@ class MCPServer:
 async def create_mcp_sse_stream(
     memory_service: MemoryService,
     claude: TokenData
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str]:
     """Create Server-Sent Events stream for MCP."""
     mcp_server = MCPServer(memory_service)
     

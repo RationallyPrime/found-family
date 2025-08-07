@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from memory_palace.api import dependencies
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.api.endpoints import memory
+from memory_palace.api.oauth import router as oauth_router
 from memory_palace.core.base import ErrorLevel
 from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger, setup_logging
@@ -49,9 +50,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
     try:
         # Initialize Neo4j driver (keep it for the app lifetime)
         logger.info("📊 Initializing Neo4j connection...")
+        neo4j_driver = None
         async for driver in create_neo4j_driver():
             neo4j_driver = driver
             break  # We get the driver from the generator
+        
+        if neo4j_driver is None:
+            raise RuntimeError("Failed to initialize Neo4j driver")
         
         # Initialize embedding service
         logger.info("🧮 Initializing Embedding Service...")
@@ -126,13 +131,14 @@ app.add_middleware(
 # Mount API routers
 app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
 
-# Include OAuth for Claude.ai authentication
-from memory_palace.api.oauth import router as oauth_router
+
 app.include_router(oauth_router)
 
-# Add MCP support
+# Add MCP support with both transports
+# HTTP for Claude.ai remote access, SSE for local Claude Code
 mcp = FastApiMCP(app)
-mcp.mount()  # Creates MCP server at /mcp
+mcp.mount_http()  # HTTP transport at /mcp for Claude.ai
+mcp.mount_sse()   # SSE transport at /sse for local Claude Code
 
 
 # Note: get_memory_service is imported from dependencies module

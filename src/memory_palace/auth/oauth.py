@@ -5,7 +5,6 @@ Since Claude is the only user, we use a simplified OAuth flow with a single API 
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -32,7 +31,7 @@ class TokenData(BaseModel):
     scopes: list[str] = []
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
@@ -45,7 +44,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 
-def verify_token(token: str) -> Optional[TokenData]:
+def verify_token(token: str) -> TokenData | None:
     """Verify and decode a JWT token."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])

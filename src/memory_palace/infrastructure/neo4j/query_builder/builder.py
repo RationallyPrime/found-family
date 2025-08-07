@@ -163,7 +163,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
 
         return self
 
-    def where(self, condition: LiteralString) -> "CypherQueryBuilder[T]":
+    def where(self, condition: str) -> "CypherQueryBuilder[T]":
         """Add a WHERE clause to the query.
 
         Args:
@@ -223,7 +223,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
 
         return self
 
-    def return_clause(self, *return_items: LiteralString) -> "CypherQueryBuilder[T]":
+    def return_clause(self, *return_items: str) -> "CypherQueryBuilder[T]":
         """Add a RETURN clause to the query.
 
         Args:
@@ -240,7 +240,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
         self._state_machine.validate_can_add_return()
 
         # Join return items with commas
-        return_str: LiteralString = ", ".join(return_items)
+        return_str = ", ".join(return_items)
 
         # Add to query parts
         self.append_query_part(create_literal_str(prefix="", clause="RETURN "))
@@ -251,7 +251,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
 
         return self
 
-    def with_clause(self, *with_items: LiteralString) -> "CypherQueryBuilder[T]":
+    def with_clause(self, *with_items: str) -> "CypherQueryBuilder[T]":
         """Add a WITH clause to the query.
 
         Args:
@@ -268,7 +268,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
         self._state_machine.validate_can_add_with()
 
         # Join with items with commas
-        with_str: LiteralString = ", ".join(with_items)
+        with_str = ", ".join(with_items)
 
         # Add to query parts
         self.append_query_part(create_literal_str(prefix="", clause="WITH "))
@@ -279,7 +279,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
 
         return self
 
-    def order_by(self, *order_items: LiteralString) -> "CypherQueryBuilder[T]":
+    def order_by(self, *order_items: str) -> "CypherQueryBuilder[T]":
         """Add an ORDER BY clause to the query.
 
         Args:
@@ -296,7 +296,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
         self._state_machine.validate_can_add_order_by()
 
         # Join order items with commas
-        order_str: LiteralString = ", ".join(order_items)
+        order_str = ", ".join(order_items)
 
         # Add to query parts
         self.append_query_part(create_literal_str(prefix="", clause="ORDER BY "))
