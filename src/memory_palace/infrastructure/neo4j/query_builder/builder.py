@@ -19,6 +19,9 @@ from neo4j import AsyncDriver, AsyncResult, AsyncTransaction, Record
 from structlog.typing import FilteringBoundLogger
 
 from memory_palace.core.logging import get_logger
+from memory_palace.infrastructure.neo4j.query_builder.helpers import (
+    QueryHelpers,
+)
 from memory_palace.infrastructure.neo4j.query_builder.interfaces import (
     QueryBuilder,
 )
@@ -27,9 +30,6 @@ from memory_palace.infrastructure.neo4j.query_builder.patterns import (
 )
 from memory_palace.infrastructure.neo4j.query_builder.specification_support import (
     SpecificationSupport,
-)
-from memory_palace.infrastructure.neo4j.query_builder.helpers import (
-    QueryHelpers,
 )
 from memory_palace.infrastructure.neo4j.query_builder.state import (
     ClauseType,

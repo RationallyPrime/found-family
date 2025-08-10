@@ -11,7 +11,7 @@ This module implements MP-002, MP-003, and MP-008 by providing:
 from __future__ import annotations
 
 # Standard logging replaced with Logfire logging
-from typing import TYPE_CHECKING, cast, LiteralString
+from typing import TYPE_CHECKING, LiteralString, cast
 from uuid import UUID, uuid4
 
 from memory_palace.core.base import ErrorLevel
@@ -173,11 +173,12 @@ class MemoryService:
                 .match(lambda p: p.node("Memory", "other"))
                 .where_param("other.id <> {}", str(memory.id))
                 .where("other.embedding IS NOT NULL")
-                .with_clause(
-                    "other",
-                    "gds.similarity.cosine(other.embedding, $embedding) AS similarity"
+                .with_similarity(
+                    node_alias="other",
+                    embedding_param="embedding",
+                    as_name="similarity"
                 )
-                .where_param("similarity > {}", similarity_threshold)
+                .filter_similarity(threshold=similarity_threshold)
                 .return_clause("other", "similarity")
                 .order_by("similarity DESC")
                 .limit(5)

@@ -1,13 +1,13 @@
 """Analysis models adapted from Automining for Memory Palace."""
 
 from datetime import datetime
-
-from memory_palace.domain.models.utils import utc_now
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+
+from memory_palace.domain.models.utils import utc_now
 
 
 class AnalysisType(str, Enum):

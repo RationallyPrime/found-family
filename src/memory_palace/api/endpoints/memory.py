@@ -1,7 +1,6 @@
 """Memory API endpoints."""
 
 import traceback
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException

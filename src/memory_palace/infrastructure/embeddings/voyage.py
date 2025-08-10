@@ -85,7 +85,7 @@ class VoyageEmbeddingService:
 
         # Handle both SecretStr and plain string for API key
         api_key = settings.voyage_api_key
-        if hasattr(api_key, 'get_secret_value') and callable(getattr(api_key, 'get_secret_value')):
+        if hasattr(api_key, 'get_secret_value') and callable(api_key.get_secret_value):
             api_key = api_key.get_secret_value()  # type: ignore
 
         if not api_key:

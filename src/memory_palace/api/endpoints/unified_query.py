@@ -9,11 +9,11 @@ This module provides a single, powerful endpoint for all query needs with:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.logging import get_logger
@@ -128,19 +128,7 @@ class CompositeFilter(BaseModel):
 
 # Define the discriminated union using Annotated pattern
 FilterType = Annotated[
-    Union[
-        SalienceFilter,
-        TopicFilter, 
-        ConversationFilter,
-        RecencyFilter,
-        EmotionalFilter,
-        OntologyFilter,
-        ConceptFilter,
-        FrequencyFilter,
-        DecayFilter,
-        RelationshipFilter,
-        CompositeFilter,
-    ],
+    SalienceFilter | TopicFilter | ConversationFilter | RecencyFilter | EmotionalFilter | OntologyFilter | ConceptFilter | FrequencyFilter | DecayFilter | RelationshipFilter | CompositeFilter,
     Field(discriminator="type")
 ]
 
@@ -427,10 +415,9 @@ async def execute_unified_query(
         if dsl.expand_relationships and dsl.include_relationships:
             return_items.append("relationships")
         
-        # Apply distinct if requested
-        if dsl.distinct:
-            return_items = [f"DISTINCT {item}" if not item.startswith("DISTINCT") else item 
-                          for item in return_items]
+        # Apply distinct if requested (only on the first item, Neo4j syntax)
+        if dsl.distinct and return_items:
+            return_items[0] = f"DISTINCT {return_items[0]}"
         
         builder.return_clause(*return_items)
         

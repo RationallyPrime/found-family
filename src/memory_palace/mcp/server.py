@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from memory_palace.auth.oauth import TokenData, verify_token
+from memory_palace.api.oauth import TokenData, verify_token
 from memory_palace.services.memory_service import MemoryService
 
 

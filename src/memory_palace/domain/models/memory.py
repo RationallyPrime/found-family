@@ -1,12 +1,12 @@
 """Memory chunk domain model."""
 
 from datetime import datetime
-
-from memory_palace.domain.models.utils import utc_now
 from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+
+from memory_palace.domain.models.utils import utc_now
 
 
 class MemoryChunk(BaseModel):

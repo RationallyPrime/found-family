@@ -4,13 +4,12 @@ These specifications enable complex, composable queries that respect
 the ontology and relationships between memories.
 """
 
-from datetime import datetime, timedelta
-
-from memory_palace.domain.models.utils import utc_now
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from memory_palace.domain.models.ontology import MemoryRole, RelationType
+from memory_palace.domain.models.utils import utc_now
 from memory_palace.domain.specifications.composite import BaseSpecification
 
 

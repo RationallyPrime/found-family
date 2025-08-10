@@ -5,13 +5,13 @@ that form the foundation of AI continuity of experience.
 """
 
 from datetime import datetime
-
-from memory_palace.domain.models.utils import utc_now
 from enum import Enum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
+
+from memory_palace.domain.models.utils import utc_now
 
 
 class MemoryRole(str, Enum):

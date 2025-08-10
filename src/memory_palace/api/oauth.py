@@ -2,7 +2,7 @@
 
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -26,6 +26,12 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     refresh_token: str | None = None
+
+
+class TokenData(BaseModel):
+    """Token payload data."""
+    client_id: str
+    scopes: list[str] = []
 
 
 @router.get("/.well-known/oauth-authorization-server")
@@ -74,7 +80,7 @@ async def authorize(
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": scope,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=10)
+        "exp": datetime.now(UTC) + timedelta(minutes=10)
     }
 
     # Build redirect URL
@@ -144,9 +150,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+        expire = datetime.now(UTC) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -155,6 +161,19 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 def create_refresh_token(data: dict):
     """Create a JWT refresh token."""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=90)
+    expire = datetime.now(UTC) + timedelta(days=90)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str) -> TokenData | None:
+    """Verify and decode a JWT token."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        client_id: str = payload.get("sub")
+        if client_id is None:
+            return None
+        scopes: list[str] = payload.get("scopes", [])
+        return TokenData(client_id=client_id, scopes=scopes)
+    except JWTError:
+        return None
