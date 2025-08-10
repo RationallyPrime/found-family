@@ -28,6 +28,9 @@ from memory_palace.infrastructure.neo4j.query_builder.patterns import (
 from memory_palace.infrastructure.neo4j.query_builder.specification_support import (
     SpecificationSupport,
 )
+from memory_palace.infrastructure.neo4j.query_builder.helpers import (
+    QueryHelpers,
+)
 from memory_palace.infrastructure.neo4j.query_builder.state import (
     ClauseType,
     CypherQueryState,
@@ -58,7 +61,7 @@ def create_literal_str(prefix: str, clause: str) -> LiteralString:
     return cast("LiteralString", prefix + clause)
 
 
-class CypherQueryBuilder(QueryBuilder, SpecificationSupport, Generic[T]):
+class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Generic[T]):
     """Type-safe fluent Cypher query builder with Specification support.
 
     This class provides a fluent interface for building Cypher queries

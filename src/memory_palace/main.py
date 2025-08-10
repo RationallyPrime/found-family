@@ -15,7 +15,7 @@ from fastapi_mcp import FastApiMCP
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
-from memory_palace.api.endpoints import admin, core, memory
+from memory_palace.api.endpoints import admin, core, memory, unified_query
 from memory_palace.api.oauth import router as oauth_router
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
@@ -127,6 +127,7 @@ app.add_middleware(
 
 # Mount API routers
 app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
+app.include_router(unified_query.router, prefix="/api/v1/unified", tags=["unified_query"])
 app.include_router(core.router)
 app.include_router(admin.router)
 app.include_router(oauth_router)

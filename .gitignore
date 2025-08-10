@@ -53,3 +53,10 @@ test_*.json
 # Temporary scripts
 update_imports.sh
 mem_palace_updated.sh
+
+# Private conversation memories - these are our personal memories
+private_memories/
+friendship_memories/
+*.conversation.json
+*.conversation.txt
+*.memory.json
