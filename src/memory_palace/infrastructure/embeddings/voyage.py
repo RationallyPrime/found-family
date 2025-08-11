@@ -18,6 +18,7 @@ from memory_palace.core.errors import (
 )
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models import EmbeddingType
+from memory_palace.infrastructure.embeddings.cache import EmbeddingCache
 
 # Settings imported at the module level
 logger = get_logger(__name__)
@@ -65,12 +66,14 @@ class VoyageEmbeddingService:
     # voyageai client doesn't expose a public type, but we can type it as voyageai.Client
     # which is what we're actually using. This avoids the Any type.
     client: voyageai.AsyncClient
+    cache: EmbeddingCache | None = None
 
     @with_error_handling(error_level=ErrorLevel.ERROR)
     def __init__(
         self,
         model: str | None = None,
         default_embedding_type: EmbeddingType = EmbeddingType.TEXT,
+        cache: EmbeddingCache | None = None,
     ) -> None:
         """Initialize the Voyage embedding service.
 
@@ -112,21 +115,10 @@ class VoyageEmbeddingService:
 
         # Initialize the client which will use the environment variable
         self.client = voyageai.AsyncClient()
+        self.cache = cache
 
-    @with_error_handling(error_level=ErrorLevel.ERROR)
-    async def embed_text(self, text: str) -> list[float]:
-        """
-        Generate an embedding vector for the provided text.
-
-        Args:
-            text: The text to embed
-
-        Returns:
-            A list of floating point values representing the embedding vector
-
-        Raises:
-            EmbeddingError: If there was an error generating the embedding
-        """
+    async def _generate_embedding(self, text: str) -> list[float]:
+        """Generate a fresh embedding via the Voyage API."""
         if not text.strip():
             raise ProcessingError(
                 message="Cannot embed empty text",
@@ -144,6 +136,22 @@ class VoyageEmbeddingService:
             )
 
         return cast("list[float]", embeddings[0])
+
+    @with_error_handling(error_level=ErrorLevel.ERROR)
+    async def embed_text(self, text: str) -> list[float]:
+        """Generate an embedding vector for the provided text with caching."""
+        if self.cache:
+            cached = await self.cache.get_cached(text)
+            if cached:
+                logger.debug(f"Embedding cache hit for text: {text[:50]}...")
+                return cached
+
+        embedding = await self._generate_embedding(text)
+
+        if self.cache:
+            await self.cache.store(text, embedding)
+
+        return embedding
 
     @with_error_handling(error_level=ErrorLevel.ERROR)
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:

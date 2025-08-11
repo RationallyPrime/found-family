@@ -1,6 +1,7 @@
 """Admin endpoints for Memory Palace management."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from neo4j import AsyncDriver
 from pydantic import BaseModel
 
 from memory_palace.core.logging import get_logger
@@ -29,6 +30,16 @@ async def get_dream_orchestrator() -> DreamJobOrchestrator:
             detail="Dream orchestrator not initialized"
         )
     return dream_orchestrator
+
+
+# Dependency to get Neo4j driver
+async def get_neo4j_driver():
+    """Get the global Neo4j driver instance."""
+    from memory_palace.main import neo4j_driver
+
+    if neo4j_driver is None:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+    return neo4j_driver
 
 
 @router.get("/jobs/status", response_model=JobStatusResponse)
@@ -72,3 +83,21 @@ async def trigger_job(
     except Exception as e:
         logger.error(f"Failed to trigger job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/cache/stats")
+async def get_cache_stats(driver: AsyncDriver = Depends(get_neo4j_driver)):
+    """Get basic statistics about the embedding cache."""
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (e:EmbeddingCache)
+            RETURN count(e) AS size,
+                   sum(coalesce(e.hit_count,0)) AS total_hits
+            """
+        )
+        record = await result.single()
+        return {
+            "size": record.get("size", 0),
+            "total_hits": record.get("total_hits", 0),
+        }
