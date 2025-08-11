@@ -82,7 +82,7 @@ class GenericMemoryRepository(Generic[T]):
                     "threshold": threshold,
                     "offset": offset,
                     "limit": limit,
-                    "k": limit + offset,
+                    "k": limit,
                     **(filters or {})
                 }
             else:
