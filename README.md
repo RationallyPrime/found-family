@@ -85,6 +85,16 @@ The memory palace will be available at:
 - Neo4j Browser: http://localhost:7474
 - API Documentation: http://localhost:8000/docs
 
+### Non-interactive setup
+
+For automated environments (e.g., Codex agents) that need a one-shot setup and launch, run:
+
+```bash
+./codex-setup.sh
+```
+
+This script installs dependencies, starts Neo4j, and launches the FastAPI app in a single step.
+
 ## Using the Memory Palace
 
 ### Storing a Memory
