@@ -18,6 +18,7 @@ from memory_palace.api import dependencies
 from memory_palace.api.endpoints import admin, core, memory, unified_query
 from memory_palace.api.oauth import router as oauth_router
 from memory_palace.core.logging import get_logger, setup_logging
+from memory_palace.infrastructure.embeddings.cache import EmbeddingCache
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
 from memory_palace.infrastructure.neo4j.driver import (
     Neo4jQuery,
@@ -60,9 +61,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         await ensure_vector_index(neo4j_driver)
         logger.info("✅ Vector index initialized")
 
-        # Initialize embedding service
+        # Initialize embedding service with cache
         logger.info("🧮 Initializing Embedding Service...")
-        embedding_service = VoyageEmbeddingService()
+        embedding_cache = EmbeddingCache(neo4j_driver.session())
+        embedding_service = VoyageEmbeddingService(cache=embedding_cache)
 
         # Set global dependencies for API endpoints
         dependencies.neo4j_driver = neo4j_driver
