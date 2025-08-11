@@ -350,7 +350,20 @@ class MemoryService:
         seed_memories: list[Memory],
         depth: int = 2
     ) -> list[Memory]:
-        """Expand memory set using vector similarity."""
+        """
+        Recursively expand a set of seed memories by finding similar memories using vector similarity.
+
+        For each memory in the current set, retrieves a set of similar memories (based on embedding similarity)
+        and adds those not already visited to the expansion set. This process is repeated up to the specified
+        depth, avoiding revisiting memories by tracking their IDs.
+
+        Args:
+            seed_memories (list[Memory]): The initial set of memories to expand from.
+            depth (int): The maximum recursion depth for expansion.
+
+        Returns:
+            list[Memory]: The expanded set of related memories found via vector similarity.
+        """
         if not seed_memories or depth <= 0:
             return []
 
