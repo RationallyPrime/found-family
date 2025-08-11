@@ -87,6 +87,22 @@ async def create_neo4j_driver(
     logger.info("Neo4j driver closed")
 
 
+async def ensure_vector_index(driver: AsyncDriver) -> None:
+    """Ensure the vector index for memory embeddings exists."""
+
+    async with driver.session() as session:
+        await session.run(
+            """
+            CREATE VECTOR INDEX memory_embeddings IF NOT EXISTS
+            FOR (m:Memory) ON m.embedding
+            OPTIONS {indexConfig: {
+              `vector.dimensions`: 1024,
+              `vector.similarity_function`: 'cosine'
+            }}
+            """
+        )
+
+
 class Neo4jQuery(Generic[T]):
     """Neo4j query executor with typed results.
 
