@@ -33,6 +33,8 @@ dependencies = [
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.20",
     "passlib>=1.7.4",
+    "scikit-learn>=1.3.0",
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]

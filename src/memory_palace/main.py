@@ -25,6 +25,7 @@ from memory_palace.infrastructure.neo4j.driver import (
     create_neo4j_driver,
     ensure_vector_index,
 )
+from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 
@@ -38,12 +39,13 @@ memory_service: MemoryService | None = None
 dream_orchestrator: DreamJobOrchestrator | None = None
 neo4j_driver: AsyncDriver | None = None
 embedding_service: VoyageEmbeddingService | None = None
+clustering_service: DBSCANClusteringService | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
     """Application lifecycle manager with DreamJobOrchestrator integration."""
-    global memory_service, dream_orchestrator, neo4j_driver, embedding_service
+    global memory_service, dream_orchestrator, neo4j_driver, embedding_service, clustering_service
 
     logger.info("🧠 Starting Memory Palace application...")
 
@@ -66,6 +68,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         embedding_cache = EmbeddingCache(neo4j_driver.session())
         embedding_service = VoyageEmbeddingService(cache=embedding_cache)
 
+        # Initialize clustering service and load model
+        logger.info("🔍 Initializing Clustering Service...")
+        clustering_service = DBSCANClusteringService()
+        async with neo4j_driver.session() as session:
+            await clustering_service.load_model(session)
+
         # Set global dependencies for API endpoints
         dependencies.neo4j_driver = neo4j_driver
         dependencies.embedding_service = embedding_service
@@ -76,8 +84,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
 
         # Initialize Dream Job Orchestrator
         logger.info("🌙 Starting Dream Job Orchestrator...")
-        # dream_orchestrator = DreamJobOrchestrator(memory_service)
-        # await dream_orchestrator.start()
+        dream_orchestrator = DreamJobOrchestrator(
+            driver=neo4j_driver,
+            embeddings=embedding_service,
+            clusterer=clustering_service,
+        )
+        await dream_orchestrator.start()
 
         logger.info("✅ Memory Palace application started successfully!")
         logger.info("🔄 Background memory management is now active")

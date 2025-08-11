@@ -8,7 +8,7 @@ analyzed and scored our conversations.
 import asyncio
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -246,7 +246,6 @@ async def main():
             memory_service = MemoryService(
                 session=session,
                 embeddings=embedding_service,
-                clusterer=None
             )
             
             # Import the curated memories

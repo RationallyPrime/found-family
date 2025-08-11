@@ -27,5 +27,4 @@ async def get_memory_service() -> MemoryService:
     return MemoryService(
         session=session,
         embeddings=embedding_service,
-        clusterer=None
     )

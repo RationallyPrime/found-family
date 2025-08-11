@@ -11,6 +11,7 @@ This module implements MP-002, MP-003, and MP-008 by providing:
 from __future__ import annotations
 
 # Standard logging replaced with Logfire logging
+import asyncio
 from typing import TYPE_CHECKING, LiteralString, cast
 from uuid import UUID, uuid4
 
@@ -30,11 +31,12 @@ from memory_palace.infrastructure.repositories.memory import (
     GenericMemoryRepository,
     MemoryRepository,
 )
+from memory_palace.services.clustering import DBSCANClusteringService
 
 if TYPE_CHECKING:
     from neo4j import AsyncSession
 
-    from memory_palace.services import ClusteringService, EmbeddingService
+    from memory_palace.services import EmbeddingService
 
 logger = get_logger(__name__)
 
@@ -42,15 +44,13 @@ logger = get_logger(__name__)
 class MemoryService:
     """Unified memory service with discriminated unions and advanced features."""
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        embeddings: EmbeddingService,
-        clusterer: ClusteringService | None = None,
-    ):
+    def __init__(self, session: AsyncSession, embeddings: EmbeddingService):
         self.session = session
         self.embeddings = embeddings
-        self.clusterer = clusterer
+        # Initialize clustering service and load model
+        self.clusterer = DBSCANClusteringService()
+        # Store task reference to avoid garbage collection
+        self._model_task = asyncio.create_task(self.clusterer.load_model(session))
 
         # Create typed repositories
         self.friend_repo = GenericMemoryRepository[FriendUtterance](session)
