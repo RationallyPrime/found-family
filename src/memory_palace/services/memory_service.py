@@ -469,7 +469,7 @@ class MemoryService:
         filter_conditions: list[str] = []
         for spec in specifications:
             if hasattr(spec, "to_cypher"):
-                clause = spec.to_cypher().replace("m.", "node.")
+                clause = spec.to_cypher(alias="node")
                 filter_conditions.append(clause)
 
         filter_clause = " AND ".join(filter_conditions)
