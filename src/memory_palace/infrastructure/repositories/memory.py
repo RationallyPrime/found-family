@@ -68,21 +68,12 @@ class GenericMemoryRepository(Generic[T]):
 
             if similarity_search:
                 embedding, threshold = similarity_search
-                # Manual cosine similarity for Neo4j Community Edition
                 query = f"""
-                MATCH (m:{labels_str})
-                WHERE m.embedding IS NOT NULL
-                WITH m,
-                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) |
-                            dot + m.embedding[i] * $embedding[i]) AS dotProduct,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) |
-                            sum + m.embedding[i] * m.embedding[i])) AS norm1,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) |
-                            sum + $embedding[i] * $embedding[i])) AS norm2
-                WITH m, dotProduct / (norm1 * norm2) AS similarity
-                WHERE similarity > $threshold
-                {self._build_filter_clause(filters) if filters else ""}
-                RETURN m, similarity
+                CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
+                YIELD node, score
+                WHERE node:{labels_str} AND score > $threshold
+                {self._build_filter_clause(filters, alias='node') if filters else ''}
+                RETURN node as m, score as similarity
                 ORDER BY similarity DESC
                 SKIP $offset LIMIT $limit
                 """
@@ -91,6 +82,7 @@ class GenericMemoryRepository(Generic[T]):
                     "threshold": threshold,
                     "offset": offset,
                     "limit": limit,
+                    "k": limit + offset,
                     **(filters or {})
                 }
             else:
@@ -250,7 +242,7 @@ class GenericMemoryRepository(Generic[T]):
 
         return f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    def _build_filter_clause(self, filters: dict[str, Any] | None) -> str:
+    def _build_filter_clause(self, filters: dict[str, Any] | None, alias: str = "m") -> str:
         """Build filter clause for similarity search (assumes WHERE already used)."""
         if not filters:
             return ""
@@ -258,12 +250,12 @@ class GenericMemoryRepository(Generic[T]):
         conditions = []
         for key, value in filters.items():
             if isinstance(value, str):
-                conditions.append(f"m.{key} = '{value}'")
+                conditions.append(f"{alias}.{key} = '{value}'")
             elif isinstance(value, int | float):
-                conditions.append(f"m.{key} = {value}")
+                conditions.append(f"{alias}.{key} = {value}")
             elif isinstance(value, list):
                 str_values = [f"'{v}'" if isinstance(v, str) else str(v) for v in value]
-                conditions.append(f"m.{key} IN [{', '.join(str_values)}]")
+                conditions.append(f"{alias}.{key} IN [{', '.join(str_values)}]")
 
         return f"AND {' AND '.join(conditions)}" if conditions else ""
 
@@ -291,21 +283,12 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         try:
             if similarity_search:
                 embedding, threshold = similarity_search
-                # Manual cosine similarity for Neo4j Community Edition
                 query = f"""
-                MATCH (m:Memory)
-                WHERE m.embedding IS NOT NULL
-                WITH m,
-                     reduce(dot = 0.0, i IN range(0, size($embedding)-1) |
-                            dot + m.embedding[i] * $embedding[i]) AS dotProduct,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) |
-                            sum + m.embedding[i] * m.embedding[i])) AS norm1,
-                     sqrt(reduce(sum = 0.0, i IN range(0, size($embedding)-1) |
-                            sum + $embedding[i] * $embedding[i])) AS norm2
-                WITH m, dotProduct / (norm1 * norm2) AS similarity
-                WHERE similarity > $threshold
-                {self._build_filter_clause(filters)}
-                RETURN m, similarity
+                CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
+                YIELD node, score
+                WHERE score > $threshold
+                {self._build_filter_clause(filters, alias='node')}
+                RETURN node as m, score as similarity
                 ORDER BY similarity DESC
                 SKIP $offset LIMIT $limit
                 """
@@ -315,6 +298,7 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                     "threshold": threshold,
                     "offset": offset,
                     "limit": limit,
+                    "k": limit + offset,
                     **(filters or {})
                 }
             else:

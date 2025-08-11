@@ -166,27 +166,19 @@ class MemoryService:
         relationships = []
 
         try:
-            # Use query builder to find similar memories
-            builder = CypherQueryBuilder()
-            query = (
-                builder
-                .match(lambda p: p.node("Memory", "other"))
-                .where_param("other.id <> {}", str(memory.id))
-                .where("other.embedding IS NOT NULL")
-                .with_similarity(
-                    node_alias="other",
-                    embedding_param="embedding",
-                    as_name="similarity"
-                )
-                .filter_similarity(threshold=similarity_threshold)
-                .return_clause("other", "similarity")
-                .order_by("similarity DESC")
-                .limit(5)
+            query = """
+            CALL db.index.vector.queryNodes('memory_embeddings', 5, $embedding)
+            YIELD node, score
+            WHERE node.id <> $id AND score > $threshold
+            RETURN node as other, score as similarity
+            ORDER BY similarity DESC
+            """
+            result = await self.run_query(
+                query,
+                embedding=memory.embedding,
+                id=str(memory.id),
+                threshold=similarity_threshold,
             )
-
-            # Execute with embedding parameter
-            query_str, params = query.build()
-            result = await self.run_query(query_str, embedding=memory.embedding, **params)
 
             # Process similar memories
             async for record in result:
@@ -215,7 +207,7 @@ class MemoryService:
                     target_id=other_id,
                     relationship_type=rel_type,
                     strength=similarity,
-                    metadata={"detection_method": "cosine_similarity"}
+                    metadata={"detection_method": "vector_index"}
                 )
 
                 await self.relationship_repo.remember(relationship)
@@ -358,51 +350,26 @@ class MemoryService:
         seed_memories: list[Memory],
         depth: int = 2
     ) -> list[Memory]:
-        """Expand memory set by following relationship edges."""
+        """Expand memory set using vector similarity."""
         if not seed_memories or depth <= 0:
             return []
 
-        expanded = []
+        expanded: list[Memory] = []
         visited_ids = {m.id for m in seed_memories}
 
         try:
             for seed in seed_memories:
-                # Find memories connected to this seed
-                builder = CypherQueryBuilder()
-                seed_id_str = str(seed.id)
-                query = (
-                    builder
-                    .match(lambda p, sid=seed_id_str: p
-                          .node("Memory", "seed", id=sid)
-                          .rel("RELATES_TO|SIMILAR_TO|FOLLOWED_BY", "r")
-                          .node("Memory", "connected")
-                          )
-                    .where("connected.id <> seed.id")
-                    .return_clause("connected", "r.strength as strength")
-                    .order_by("r.strength DESC")
-                    .limit(5)  # Limit expansion per seed
+                if not getattr(seed, "embedding", None):
+                    continue
+                similar = await self.memory_repo.recall_any(
+                    similarity_search=(seed.embedding, 0.7),
+                    limit=5
                 )
+                for memory in similar:
+                    if memory.id not in visited_ids and memory.id != seed.id:
+                        expanded.append(memory)
+                        visited_ids.add(memory.id)
 
-                query_str, params = query.build()
-                result = await self.run_query(query_str, **params)
-
-                async for record in result:
-                    connected_data = dict(record["connected"])
-                    connected_id = UUID(connected_data["id"])
-
-                    if connected_id not in visited_ids:
-                        # Convert to appropriate memory type based on memory_type
-                        memory_type_str = connected_data.get("memory_type")
-                        if memory_type_str:
-                            try:
-                                # Use discriminated union to automatically route to correct type
-                                connected_memory = Memory.model_validate(connected_data)
-                                expanded.append(connected_memory)
-                                visited_ids.add(connected_id)
-                            except Exception as e:
-                                logger.warning(f"Failed to deserialize connected memory {connected_id}: {e}")
-
-            # Recursively expand if depth > 1
             if depth > 1:
                 recursive_expanded = await self._expand_via_relationships(expanded, depth - 1)
                 for memory in recursive_expanded:
@@ -413,7 +380,7 @@ class MemoryService:
             return expanded
 
         except Exception as e:
-            logger.error(f"Graph expansion failed: {e}")
+            logger.error(f"Vector expansion failed: {e}")
             return []
 
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=True)
@@ -499,45 +466,43 @@ class MemoryService:
             >>> memories = await service.recall_with_specifications(specs)
         """
         # Build Cypher query from specifications
-        builder = CypherQueryBuilder()
-        builder.match(lambda p: p.node("Memory", "m"))
-        
-        # Apply each specification as a WHERE clause
+        filter_conditions: list[str] = []
         for spec in specifications:
-            if hasattr(spec, 'to_cypher'):
-                cypher_clause = spec.to_cypher()
-                builder.where(cypher_clause)
-        
-        # Add similarity search if query provided
+            if hasattr(spec, "to_cypher"):
+                clause = spec.to_cypher().replace("m.", "node.")
+                filter_conditions.append(clause)
+
+        filter_clause = " AND ".join(filter_conditions)
+        if filter_clause:
+            filter_clause = "AND " + filter_clause
+
         if query:
             query_embedding = await self.embeddings.embed_text(query)
-            # Add embedding as a parameter
-            param_name = builder.add_parameter(query_embedding)
-            # We'll use this parameter name in the similarity calculation
-            
-            # Add similarity calculation and filter using the parameter name
-            similarity_calc = f"""
-            reduce(dot = 0.0, i IN range(0, size(${param_name})-1) | 
-                   dot + m.embedding[i] * ${param_name}[i]) /
-            (sqrt(reduce(sum = 0.0, i IN range(0, size(m.embedding)-1) | 
-                   sum + m.embedding[i] * m.embedding[i])) *
-             sqrt(reduce(sum = 0.0, i IN range(0, size(${param_name})-1) | 
-                   sum + ${param_name}[i] * ${param_name}[i])))
+            cypher_query = f"""
+            CALL db.index.vector.queryNodes('memory_embeddings', $limit, $embedding)
+            YIELD node, score
+            WHERE score > $threshold {filter_clause}
+            RETURN node as m, score as similarity
+            ORDER BY similarity DESC
+            LIMIT $limit
             """
-            builder.with_clause("m", f"{similarity_calc} AS similarity")
-            builder.where_param("similarity > {}", similarity_threshold)
-            builder.return_clause("m", "similarity")
-            builder.order_by("similarity DESC")
+            result = await self.run_query(
+                cypher_query,
+                embedding=query_embedding,
+                threshold=similarity_threshold,
+                limit=limit,
+            )
         else:
+            builder = CypherQueryBuilder()
+            builder.match(lambda p: p.node("Memory", "m"))
+            for spec in specifications:
+                if hasattr(spec, "to_cypher"):
+                    builder.where(spec.to_cypher())
             builder.return_clause("m")
-            # Order by timestamp if no similarity search
             builder.order_by("m.timestamp DESC")
-        
-        builder.limit(limit)
-        
-        # Execute query
-        query_str, params = builder.build()
-        result = await self.run_query(query_str, **params)
+            builder.limit(limit)
+            query_str, params = builder.build()
+            result = await self.run_query(query_str, **params)
         
         memories = []
         async for record in result:

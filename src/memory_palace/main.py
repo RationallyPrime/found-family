@@ -19,7 +19,11 @@ from memory_palace.api.endpoints import admin, core, memory, unified_query
 from memory_palace.api.oauth import router as oauth_router
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
-from memory_palace.infrastructure.neo4j.driver import Neo4jQuery, create_neo4j_driver
+from memory_palace.infrastructure.neo4j.driver import (
+    Neo4jQuery,
+    create_neo4j_driver,
+    ensure_vector_index,
+)
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 
@@ -52,6 +56,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
 
         if neo4j_driver is None:
             raise RuntimeError("Failed to initialize Neo4j driver")
+
+        await ensure_vector_index(neo4j_driver)
+        logger.info("✅ Vector index initialized")
 
         # Initialize embedding service
         logger.info("🧮 Initializing Embedding Service...")
