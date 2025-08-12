@@ -20,10 +20,12 @@ class DreamJobOrchestrator:
         driver: "AsyncDriver",
         embeddings: "EmbeddingService",
         clusterer: "ClusteringService",
+        decay_lambda: float = 0.0154,  # 45-day half-life by default
     ):
         self.driver = driver
         self.embeddings = embeddings
         self.clusterer = clusterer
+        self.decay_factor = 1 - decay_lambda  # Convert to decay factor
         self.scheduler = AsyncIOScheduler()
         self._setup_jobs()
 
@@ -74,9 +76,10 @@ class DreamJobOrchestrator:
                     """
                     MATCH (m:Memory)
                     WHERE m.salience > 0.05
-                    SET m.salience = m.salience * 0.9846
+                    SET m.salience = m.salience * $decay_factor
                     RETURN count(m) as updated
                     """,
+                    decay_factor=self.decay_factor,
                 )
                 record = await result.single()
                 updated = record["updated"] if record else 0
