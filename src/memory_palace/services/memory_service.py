@@ -11,7 +11,6 @@ This module implements MP-002, MP-003, and MP-008 by providing:
 from __future__ import annotations
 
 # Standard logging replaced with Logfire logging
-import asyncio
 from typing import TYPE_CHECKING, LiteralString, cast
 from uuid import UUID, uuid4
 
