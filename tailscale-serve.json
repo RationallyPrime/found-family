@@ -1,0 +1,16 @@
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "memory-palace.tailnet.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://memory-palace-api:8000"
+        }
+      }
+    }
+  }
+}

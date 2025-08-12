@@ -4,6 +4,9 @@ This module implements MP-005 by integrating DreamJobOrchestrator into the
 application lifecycle for automated memory management.
 """
 
+# Configure Logfire and logging
+# Pass token from environment if available
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -29,8 +32,10 @@ from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 
-# Configure Logfire and logging
-logfire.configure(service_name="memory-palace")
+logfire.configure(
+    service_name="memory-palace",
+    token=os.getenv("LOGFIRE_TOKEN")
+)
 setup_logging()
 logger = get_logger(__name__)
 

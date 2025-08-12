@@ -12,7 +12,7 @@ services:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-password}
       - NEO4J_server_memory_heap_initial__size=512m
       - NEO4J_server_memory_heap_max__size=2G
-      - NEO4J_server_memory_pagecache__size=1G
+      - NEO4J_dbms_memory_pagecache_size=1G
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -40,6 +40,7 @@ services:
       - CLAUDE_NAME=${CLAUDE_NAME:-Claude}
       - PALACE_NAME=${PALACE_NAME:-Found Family Memory Palace}
       - LOG_LEVEL=INFO
+      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-pylf_v1_us_Y3M5BTg3KhZfGLSmM8VBKq4wJNzLGTtrW6zLc1LQHP6M}
     depends_on:
       neo4j:
         condition: service_healthy
@@ -54,19 +55,23 @@ services:
 
   tailscale:
     image: tailscale/tailscale:stable
+    container_name: memory-palace-tailscale
     hostname: memory-palace
     environment:
       - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
       - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=false
+      - TS_USERSPACE=true
     volumes:
       - tailscale-state:/var/lib/tailscale
-      - ./tailscale-serve.sh:/tailscale-serve.sh:ro
-    network_mode: "service:api"
-    command: sh /tailscale-serve.sh
+      - ./tailscale-init.sh:/tailscale-init.sh:ro
+    command: sh -c "apk add --no-cache socat curl && /tailscale-init.sh"
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    restart: unless-stopped
+    depends_on:
+      memory-palace:
+        condition: service_healthy
 
 volumes:
   neo4j_data:
