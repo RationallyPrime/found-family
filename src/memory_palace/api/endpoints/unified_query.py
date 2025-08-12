@@ -286,7 +286,7 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
     
     elif isinstance(filter_spec, RelationshipFilter):
         # Convert string relationship types to RelationType enum if needed
-        from memory_palace.domain.models.base import RelationType
+        from memory_palace.domain.models.ontology import RelationType
         rel_types = None
         if filter_spec.relationship_types:
             rel_types = [RelationType(rt) if isinstance(rt, str) else rt 
