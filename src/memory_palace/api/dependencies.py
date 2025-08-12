@@ -24,8 +24,10 @@ async def get_memory_service() -> MemoryService:
     # Create a new session for this request
     # Note: The session will be cleaned up when the request completes
     session = neo4j_driver.session()
-    return MemoryService(
+    service = MemoryService(
         session=session,
         embeddings=embedding_service,
-        clusterer=None
     )
+    # Initialize the service (load clustering model if needed)
+    await service.initialize()
+    return service

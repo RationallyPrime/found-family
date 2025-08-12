@@ -310,7 +310,6 @@ async def main():
             memory_service = MemoryService(
                 session=session,
                 embeddings=embedding_service,
-                clusterer=None
             )
             
             total_imported = 0

@@ -30,11 +30,12 @@ from memory_palace.infrastructure.repositories.memory import (
     GenericMemoryRepository,
     MemoryRepository,
 )
+from memory_palace.services.clustering import DBSCANClusteringService
 
 if TYPE_CHECKING:
     from neo4j import AsyncSession
 
-    from memory_palace.services import ClusteringService, EmbeddingService
+    from memory_palace.services import EmbeddingService
 
 logger = get_logger(__name__)
 
@@ -42,15 +43,11 @@ logger = get_logger(__name__)
 class MemoryService:
     """Unified memory service with discriminated unions and advanced features."""
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        embeddings: EmbeddingService,
-        clusterer: ClusteringService | None = None,
-    ):
+    def __init__(self, session: AsyncSession, embeddings: EmbeddingService):
         self.session = session
         self.embeddings = embeddings
-        self.clusterer = clusterer
+        # Initialize clustering service (model will be loaded separately)
+        self.clusterer = DBSCANClusteringService()
 
         # Create typed repositories
         self.friend_repo = GenericMemoryRepository[FriendUtterance](session)
@@ -58,6 +55,10 @@ class MemoryService:
         # Use the specialized MemoryRepository for the discriminated union
         self.memory_repo = MemoryRepository(session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
+    
+    async def initialize(self) -> None:
+        """Initialize the service, loading models etc."""
+        await self.clusterer.load_model(self.session)
     
     async def run_query(self, query: str, **params):
         """Helper method to run queries with proper type casting.
