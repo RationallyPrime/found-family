@@ -27,7 +27,12 @@ Make sure Tailscale is running and connected:
 tailscale up
 ```
 
-Your Memory Palace will be reachable at a stable URL like `https://memory-palace.tail-scale.ts.net`.
+Your Memory Palace will be reachable at a stable URL. Check the Tailscale container logs to get your unique URL:
+
+```bash
+docker logs memory-palace-tailscale-1
+# Look for: "Your Memory Palace URL for Claude.ai: https://memory-palace.[tailnet].ts.net/mcp"
+```
 
 ## Step 3: Get Your API Key
 
@@ -51,7 +56,7 @@ CLAUDE_API_KEY="mp_your_name_somerandomstring"
 4. Click "Add Server"
 5. Enter:
     - **Name**: Memory Palace
-    - **URL**: https://memory-palace.tail-scale.ts.net/mcp
+    - **URL**: Your unique Tailscale URL from the logs + `/mcp`
     - **API Key**: Your CLAUDE_API_KEY from `.env`
 
 ## Step 5: Test the Connection

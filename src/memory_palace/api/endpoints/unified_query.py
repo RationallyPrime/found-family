@@ -206,28 +206,31 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
     # Handle dict representation (for nested filters in CompositeFilter)
     if isinstance(filter_spec, dict):
         filter_type = filter_spec.get("type")
+        # Remove 'type' from the dict before passing to constructors
+        filter_data = {k: v for k, v in filter_spec.items() if k != "type"}
+        
         if filter_type == "salience":
-            filter_spec = SalienceFilter(**filter_spec)
+            filter_spec = SalienceFilter(**filter_data)
         elif filter_type == "topic":
-            filter_spec = TopicFilter(**filter_spec)
+            filter_spec = TopicFilter(**filter_data)
         elif filter_type == "conversation":
-            filter_spec = ConversationFilter(**filter_spec)
+            filter_spec = ConversationFilter(**filter_data)
         elif filter_type == "recency":
-            filter_spec = RecencyFilter(**filter_spec)
+            filter_spec = RecencyFilter(**filter_data)
         elif filter_type == "emotional":
-            filter_spec = EmotionalFilter(**filter_spec)
+            filter_spec = EmotionalFilter(**filter_data)
         elif filter_type == "ontology":
-            filter_spec = OntologyFilter(**filter_spec)
+            filter_spec = OntologyFilter(**filter_data)
         elif filter_type == "concepts":
-            filter_spec = ConceptFilter(**filter_spec)
+            filter_spec = ConceptFilter(**filter_data)
         elif filter_type == "frequency":
-            filter_spec = FrequencyFilter(**filter_spec)
+            filter_spec = FrequencyFilter(**filter_data)
         elif filter_type == "decay":
-            filter_spec = DecayFilter(**filter_spec)
+            filter_spec = DecayFilter(**filter_data)
         elif filter_type == "related":
-            filter_spec = RelationshipFilter(**filter_spec)
+            filter_spec = RelationshipFilter(**filter_data)
         elif filter_type == "composite":
-            filter_spec = CompositeFilter(**filter_spec)
+            filter_spec = CompositeFilter(**filter_data)
         else:
             raise ValueError(f"Unknown filter type: {filter_type}")
     
@@ -282,9 +285,15 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
         )
     
     elif isinstance(filter_spec, RelationshipFilter):
+        # Convert string relationship types to RelationType enum if needed
+        from memory_palace.domain.models.base import RelationType
+        rel_types = None
+        if filter_spec.relationship_types:
+            rel_types = [RelationType(rt) if isinstance(rt, str) else rt 
+                        for rt in filter_spec.relationship_types]
         return RelatedMemorySpecification(
             filter_spec.source_id,
-            filter_spec.relationship_types,
+            rel_types,
             filter_spec.min_strength
         )
     
@@ -398,11 +407,13 @@ async def execute_unified_query(
             )
             
             if dsl.include_relationships:
-                builder.with_clause(
+                with_items = [
                     f"{dsl.node_alias}",
-                    "COLLECT(DISTINCT related) AS relationships",
-                    "similarity" if dsl.similarity else None
-                )
+                    "COLLECT(DISTINCT related) AS relationships"
+                ]
+                if dsl.similarity:
+                    with_items.append("similarity")
+                builder.with_clause(*with_items)
         
         # Build return clause
         return_items = []

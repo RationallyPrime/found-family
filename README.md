@@ -90,11 +90,12 @@ The memory palace will be available at:
 ### Via Tailscale (Recommended)
 1. Install Tailscale on your device
 2. Join the same Tailnet
-3. Access at: https://memory-palace.tail-scale.ts.net
+3. Check logs for your unique URL: `docker logs memory-palace-tailscale-1`
+4. Your URL will be like: `https://memory-palace.[tailnet-name].ts.net`
 
 ### For Claude.ai Integration
-- URL: https://memory-palace.tail-scale.ts.net/mcp
-- API Key: [from your .env file]
+- URL: `https://memory-palace.[tailnet-name].ts.net/mcp`
+- API Key: [from your .env file CLAUDE_API_KEY]
 
 ### Non-interactive setup
 
