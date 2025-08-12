@@ -381,7 +381,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Gener
         return self
 
     def set_property(
-        self, node_var: LiteralString, properties: dict[str, Any]
+        self, node_var: str, properties: dict[str, Any]
     ) -> "CypherQueryBuilder[T]":
         """Add a SET clause to set node properties.
 
