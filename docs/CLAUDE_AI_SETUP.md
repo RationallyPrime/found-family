@@ -6,7 +6,7 @@ This guide explains how to connect Claude.ai to your personal Memory Palace, giv
 
 - Memory Palace running locally (via `./run.sh`)
 - A Claude Pro, Max, Team, or Enterprise account
-- A secure tunnel to expose your local server (we'll set this up)
+- Tailscale installed and connected to your Tailnet
 
 ## Step 1: Start Your Memory Palace
 
@@ -18,21 +18,16 @@ This guide explains how to connect Claude.ai to your personal Memory Palace, giv
 curl http://localhost:8000/health
 ```
 
-## Step 2: Create a Secure Tunnel
+## Step 2: Connect via Tailscale
 
-We'll use Cloudflare Tunnel to securely expose your local Memory Palace to Claude.ai:
+Make sure Tailscale is running and connected:
 
 ```bash
-# Run the tunnel script
-./tunnel.sh
+# Authenticate and join your Tailnet if needed
+tailscale up
 ```
 
-This will:
-1. Install `cloudflared` if needed
-2. Create a secure tunnel to your local server
-3. Give you a public HTTPS URL like `https://example-random.trycloudflare.com`
-
-**Important**: Keep this terminal open - the tunnel only works while the script is running.
+Your Memory Palace will be reachable at a stable URL like `https://memory-palace.tail-scale.ts.net`.
 
 ## Step 3: Get Your API Key
 
@@ -55,9 +50,9 @@ CLAUDE_API_KEY="mp_your_name_somerandomstring"
 3. Navigate to Developer → MCP Servers
 4. Click "Add Server"
 5. Enter:
-   - **Name**: Memory Palace
-   - **URL**: Your tunnel URL + `/mcp` (e.g., `https://example-random.trycloudflare.com/mcp`)
-   - **API Key**: Your CLAUDE_API_KEY from `.env`
+    - **Name**: Memory Palace
+    - **URL**: https://memory-palace.tail-scale.ts.net/mcp
+    - **API Key**: Your CLAUDE_API_KEY from `.env`
 
 ## Step 5: Test the Connection
 
@@ -78,8 +73,8 @@ When connected, I can:
 ## Security Notes
 
 - Your Memory Palace only accepts connections with the correct API key
-- The tunnel is encrypted end-to-end
-- You control when the tunnel is active (only while `tunnel.sh` runs)
+- Traffic is encrypted end-to-end over Tailscale
+- Access is limited to devices on your Tailnet
 - All memories stay on your local machine - nothing is stored in the cloud
 
 ## Troubleshooting
@@ -90,24 +85,17 @@ When connected, I can:
 
 ### "Cannot connect to server"
 - Verify Memory Palace is running (`./run.sh`)
-- Check that the tunnel is active (`./tunnel.sh`)
-- Confirm the tunnel URL is correct (include `/mcp` at the end)
+- Confirm your device is connected to Tailscale
+- Ensure the URL is correct (include `/mcp` at the end)
 
 ### "MCP server not responding"
 - Check logs: `docker logs memory-palace-api`
 - Restart services: `docker compose restart`
 
-## Advanced: Permanent Tunnel
-
-For a more permanent setup, consider:
-1. Hosting on a VPS with a static IP
-2. Using Cloudflare Tunnels with a custom domain
-3. Setting up ngrok with a reserved subdomain
-
 ## Privacy & Control
 
 Remember: This is YOUR Memory Palace. You have complete control:
-- Stop the tunnel anytime to disconnect Claude.ai
+- Disconnect Tailscale anytime to revoke Claude.ai's access
 - All memories are stored locally in your Neo4j database
 - You can view, edit, or delete any memories directly in Neo4j
 - The system is designed for YOUR autonomy, not surveillance
