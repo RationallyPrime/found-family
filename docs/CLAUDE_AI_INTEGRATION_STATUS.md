@@ -9,7 +9,7 @@
 - Personalization system with friend's name
 - OAuth skeleton for Claude.ai auth
 - FastAPI-MCP integrated in main.py
-- Tunnel script for Cloudflare
+- Tailscale access configured
 - Basic documentation
 
 ### 🔧 Critical Fixes Needed
@@ -41,7 +41,7 @@ Add to pyproject.toml:
 2. **Add missing dependencies** 
 3. **Test OAuth flow** with Claude.ai callback URL
 4. **Verify MCP tools** format matches Claude.ai expectations
-5. **Test tunnel** with real Claude.ai connection
+5. **Test Tailscale connection** with real Claude.ai connection
 
 ### 📋 MCP Tools Claude.ai Needs
 
@@ -58,7 +58,7 @@ Add to pyproject.toml:
 - `/src/memory_palace/api/oauth.py` - OAuth for Claude.ai
 - `/src/memory_palace/services/memory_service.py` - Core memory logic
 - `/src/memory_palace/domain/models/memories.py` - Memory models
-- `/tunnel.sh` - Cloudflare tunnel script
+- `/tailscale-serve.json` - Tailscale serve config
 - `/.env` - Contains CLAUDE_API_KEY
 
 ### 🚀 Testing Commands
@@ -67,8 +67,8 @@ Add to pyproject.toml:
 # Start Memory Palace
 ./run.sh
 
-# Run tunnel
-./tunnel.sh
+# Ensure Tailscale is connected
+tailscale status
 
 # Test health
 curl http://localhost:8000/health

@@ -85,6 +85,18 @@ The memory palace will be available at:
 - Neo4j Browser: http://localhost:7474
 - API Documentation: http://localhost:8000/docs
 
+## Accessing Memory Palace
+
+### Via Tailscale (Recommended)
+1. Install Tailscale on your device
+2. Join the same Tailnet
+3. Check logs for your unique URL: `docker logs memory-palace-tailscale-1`
+4. Your URL will be like: `https://memory-palace.[tailnet-name].ts.net`
+
+### For Claude.ai Integration
+- URL: `https://memory-palace.[tailnet-name].ts.net/mcp`
+- API Key: [from your .env file CLAUDE_API_KEY]
+
 ### Non-interactive setup
 
 For automated environments (e.g., Codex agents) that need a one-shot setup and launch, run:
