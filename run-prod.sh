@@ -67,7 +67,7 @@ echo -e "\n${GREEN}✓ Neo4j is ready!${NC}"
 
 # Wait for API to be ready
 echo -e "${YELLOW}Waiting for API to be ready...${NC}"
-until curl -f http://localhost:8000/api/v1/memory/health &>/dev/null; do
+until curl -f http://localhost:8000/health &>/dev/null; do
     sleep 1
     echo -n "."
 done
@@ -76,18 +76,31 @@ echo -e "\n${GREEN}✓ API is ready!${NC}"
 # Check Tailscale status if auth key was provided
 if grep -q "TAILSCALE_AUTHKEY=tskey" .env 2>/dev/null; then
     echo -e "${YELLOW}Waiting for Tailscale to connect...${NC}"
-    sleep 5
     
-    # Try to get Tailscale hostname
-    TAILSCALE_HOSTNAME=$(docker compose -f docker-compose.prod.yml exec -T tailscale tailscale status --json 2>/dev/null | grep -o '"Self":{"ID":"[^"]*","PublicKey":"[^"]*","HostName":"[^"]*"' | grep -o '"HostName":"[^"]*"' | cut -d'"' -f4)
+    # Wait for Tailscale container to be ready
+    for i in {1..30}; do
+        if docker compose -f docker-compose.prod.yml exec -T tailscale tailscale status &>/dev/null; then
+            break
+        fi
+        sleep 1
+        echo -n "."
+    done
+    echo ""
+    
+    # Try to get Tailscale hostname (using jq if available in container)
+    TAILSCALE_HOSTNAME=$(docker compose -f docker-compose.prod.yml exec -T tailscale sh -c "tailscale status --json | jq -r '.Self.DNSName' 2>/dev/null || tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | cut -d'\"' -f4" 2>/dev/null || echo "")
     
     if [ ! -z "$TAILSCALE_HOSTNAME" ]; then
         echo -e "${GREEN}✓ Tailscale connected!${NC}"
-        TAILSCALE_URL="https://${TAILSCALE_HOSTNAME}.${TAILNET_NAME:-tailnet}.ts.net"
+        echo -e "${GREEN}✓ Tailscale Funnel enabled for public access!${NC}"
+        TAILSCALE_URL="https://${TAILSCALE_HOSTNAME}"
+        MCP_URL="https://${TAILSCALE_HOSTNAME}/mcp"
     else
-        echo -e "${YELLOW}⚠ Tailscale may still be connecting...${NC}"
-        TAILSCALE_URL="Check: docker compose -f docker-compose.prod.yml logs tailscale"
+        echo -e "${YELLOW}⚠ Tailscale is optional - continuing without it${NC}"
+        echo -e "${YELLOW}  To enable: Add TAILSCALE_AUTHKEY to .env${NC}"
     fi
+else
+    echo -e "${BLUE}ℹ Tailscale not configured (optional)${NC}"
 fi
 
 echo -e "\n${GREEN}✅ All services started!${NC}"
@@ -99,7 +112,10 @@ echo -e "    API Base:      ${BLUE}http://localhost:8000/api/v1${NC}"
 
 if [ ! -z "$TAILSCALE_URL" ]; then
     echo -e "\n  ${CYAN}Tailscale Access:${NC}"
-    echo -e "    Remote URL:    ${CYAN}${TAILSCALE_URL}${NC}"
+    echo -e "    Tailnet URL:   ${CYAN}${TAILSCALE_URL}${NC}"
+    if [ ! -z "$MCP_URL" ]; then
+        echo -e "    Claude.ai MCP: ${CYAN}${MCP_URL}${NC}"
+    fi
 fi
 
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

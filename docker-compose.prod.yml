@@ -43,7 +43,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/memory/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -61,11 +61,13 @@ services:
       - TS_USERSPACE=true
     volumes:
       - tailscale-state:/var/lib/tailscale
-      - ./tailscale-init.sh:/tailscale-init.sh:ro
-    command: sh -c "apk add --no-cache socat curl && /tailscale-init.sh"
+      - ./tailscale-init-enhanced.sh:/tailscale-init.sh:ro
+      - /dev/net/tun:/dev/net/tun
+    command: sh -c "apk add --no-cache socat curl jq && /tailscale-init.sh"
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    privileged: true
     restart: unless-stopped
     depends_on:
       memory-palace:

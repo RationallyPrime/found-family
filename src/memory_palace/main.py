@@ -14,7 +14,7 @@ import logfire
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_mcp import FastApiMCP
+from memory_palace.mcp.enhanced_server import EnhancedMCPServer
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
@@ -158,9 +158,9 @@ app.include_router(core.router)
 app.include_router(admin.router)
 app.include_router(oauth_router)
 
-# Add MCP support with both transports
+# Add MCP support with both transports using our enhanced server
 # HTTP for Claude.ai remote access, SSE for local Claude Code
-mcp = FastApiMCP(app)
+mcp = EnhancedMCPServer(app)
 mcp.mount_http()  # HTTP transport at /mcp for Claude.ai
 mcp.mount_sse()   # SSE transport at /sse for local Claude Code
 
