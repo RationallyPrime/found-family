@@ -94,8 +94,9 @@ class MemoryService:
             )
 
             # Create memory objects with discriminated union types
-            # Use provided salience or default to 0.5 (normal importance)
-            memory_salience = salience if salience is not None else 0.5
+            # Use provided salience or default to 0.3 (regular conversation)
+            # We use 0.3 as baseline since if we're storing it, it's already worth remembering
+            memory_salience = salience if salience is not None else 0.3
             
             friend_memory = FriendUtterance(
                 id=uuid4(),

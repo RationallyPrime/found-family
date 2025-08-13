@@ -4,7 +4,7 @@ import traceback
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.config import settings
@@ -27,13 +27,30 @@ class StoreTurnRequest(BaseModel):
     ontology_path: list[str] | None = None
     
     # Memory importance/salience (0.0-1.0 scale)
-    # Guidelines:
-    #   0.1-0.3: Routine, ephemeral ("what's the weather?")
-    #   0.4-0.6: Normal conversation, useful but not critical
-    #   0.7-0.8: Important information (preferences, decisions, learning moments)
-    #   0.9-1.0: Critical/foundational (core beliefs, major events, key relationships)
-    # If not provided, system auto-assigns based on content analysis
-    salience: float | None = None
+    # Recalibrated scale (since we only store things worth remembering):
+    #   0.0-0.2: Background context, ambient information
+    #   0.3-0.4: Regular conversation, standard Q&A
+    #   0.5-0.6: Interesting or useful information
+    #   0.7-0.8: Important preferences, decisions, learning moments
+    #   0.9-1.0: Critical memories - core beliefs, breakthroughs, defining moments
+    # Default if not provided: 0.3 (regular conversation)
+    salience: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number not text."
+    )
+    
+    @field_validator('salience')
+    @classmethod
+    def validate_salience(cls, v):
+        if v is not None and not isinstance(v, (int, float)):
+            raise ValueError(
+                "Salience must be a number between 0.0 and 1.0. "
+                "Examples: 0.5 for normal, 0.8 for important. "
+                "Do not use strings like 'high' or 'very important'."
+            )
+        return v
 
 
 class StoreTurnResponse(BaseModel):
