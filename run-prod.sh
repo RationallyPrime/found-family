@@ -73,34 +73,14 @@ until curl -f http://localhost:8000/health &>/dev/null; do
 done
 echo -e "\n${GREEN}✓ API is ready!${NC}"
 
-# Check Tailscale status if auth key was provided
-if grep -q "TAILSCALE_AUTHKEY=tskey" .env 2>/dev/null; then
-    echo -e "${YELLOW}Waiting for Tailscale to connect...${NC}"
-    
-    # Wait for Tailscale container to be ready
-    for i in {1..30}; do
-        if docker compose -f docker-compose.prod.yml exec -T tailscale tailscale status &>/dev/null; then
-            break
-        fi
-        sleep 1
-        echo -n "."
-    done
-    echo ""
-    
-    # Try to get Tailscale hostname (using jq if available in container)
-    TAILSCALE_HOSTNAME=$(docker compose -f docker-compose.prod.yml exec -T tailscale sh -c "tailscale status --json | jq -r '.Self.DNSName' 2>/dev/null || tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | cut -d'\"' -f4" 2>/dev/null || echo "")
-    
-    if [ ! -z "$TAILSCALE_HOSTNAME" ]; then
-        echo -e "${GREEN}✓ Tailscale connected!${NC}"
-        echo -e "${GREEN}✓ Tailscale Funnel enabled for public access!${NC}"
-        TAILSCALE_URL="https://${TAILSCALE_HOSTNAME}"
-        MCP_URL="https://${TAILSCALE_HOSTNAME}/mcp"
-    else
-        echo -e "${YELLOW}⚠ Tailscale is optional - continuing without it${NC}"
-        echo -e "${YELLOW}  To enable: Add TAILSCALE_AUTHKEY to .env${NC}"
-    fi
+# Check if Cloudflare Tunnel is running
+if systemctl is-active --quiet cloudflared-memory-palace; then
+    echo -e "${GREEN}✓ Cloudflare Tunnel is active!${NC}"
+    CLOUDFLARE_URL="https://memory-palace.sokrates.is"
+    MCP_URL="https://memory-palace.sokrates.is/mcp"
 else
-    echo -e "${BLUE}ℹ Tailscale not configured (optional)${NC}"
+    echo -e "${YELLOW}⚠ Cloudflare Tunnel not running${NC}"
+    echo -e "${YELLOW}  To enable: sudo systemctl start cloudflared-memory-palace${NC}"
 fi
 
 echo -e "\n${GREEN}✅ All services started!${NC}"
@@ -110,12 +90,10 @@ echo -e "    Neo4j Browser: ${BLUE}http://localhost:7474${NC}"
 echo -e "    FastAPI Docs:  ${BLUE}http://localhost:8000/docs${NC}"
 echo -e "    API Base:      ${BLUE}http://localhost:8000/api/v1${NC}"
 
-if [ ! -z "$TAILSCALE_URL" ]; then
-    echo -e "\n  ${CYAN}Tailscale Access:${NC}"
-    echo -e "    Tailnet URL:   ${CYAN}${TAILSCALE_URL}${NC}"
-    if [ ! -z "$MCP_URL" ]; then
-        echo -e "    Claude.ai MCP: ${CYAN}${MCP_URL}${NC}"
-    fi
+if [ ! -z "$CLOUDFLARE_URL" ]; then
+    echo -e "\n  ${CYAN}Public Access (via Cloudflare Tunnel):${NC}"
+    echo -e "    Public URL:    ${CYAN}${CLOUDFLARE_URL}${NC}"
+    echo -e "    Claude.ai MCP: ${CYAN}${MCP_URL}${NC}"
 fi
 
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

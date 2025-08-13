@@ -1,0 +1,17 @@
+[Unit]
+Description=Cloudflare Tunnel for Memory Palace
+After=network.target
+
+[Service]
+Type=simple
+User=rationallyprime
+Group=rationallyprime
+ExecStart=/usr/local/bin/cloudflared tunnel --config /home/rationallyprime/.cloudflared/config.yml run memory-palace
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared-memory-palace
+
+[Install]
+WantedBy=multi-user.target

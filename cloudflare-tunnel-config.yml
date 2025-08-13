@@ -1,0 +1,16 @@
+# Cloudflare Tunnel configuration for Memory Palace
+# This replaces Tailscale for public MCP endpoint exposure
+
+tunnel: memory-palace
+credentials-file: /home/rationallyprime/.cloudflared/memory-palace.json
+
+ingress:
+  # MCP endpoint for Claude.ai
+  - hostname: memory-palace.sokrates.is
+    service: http://localhost:8000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      
+  # Catch-all for other requests
+  - service: http_status:404

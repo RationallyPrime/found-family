@@ -54,6 +54,14 @@ test_*.json
 update_imports.sh
 mem_palace_updated.sh
 
+# Cloudflare Tunnel credentials (SENSITIVE!)
+*.pem
+cloudflared-*.json
+.cloudflared/
+
+# Tailscale state (no longer used)
+tailscale-state/
+
 # Private conversation memories - these are our personal memories
 private_memories/
 friendship_memories/

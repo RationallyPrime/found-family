@@ -51,32 +51,8 @@ services:
     volumes:
       - ./logs:/app/logs
 
-  tailscale:
-    image: tailscale/tailscale:stable
-    container_name: memory-palace-tailscale
-    hostname: memory-palace
-    environment:
-      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=true
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./tailscale-init-enhanced.sh:/tailscale-init.sh:ro
-      - /dev/net/tun:/dev/net/tun
-    command: sh -c "apk add --no-cache socat curl jq && /tailscale-init.sh"
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    privileged: true
-    restart: unless-stopped
-    depends_on:
-      memory-palace:
-        condition: service_healthy
-
 volumes:
   neo4j_data:
     driver: local
   neo4j_logs:
-    driver: local
-  tailscale-state:
     driver: local

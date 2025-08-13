@@ -14,7 +14,6 @@ import logfire
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from memory_palace.mcp.enhanced_server import EnhancedMCPServer
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
@@ -28,6 +27,7 @@ from memory_palace.infrastructure.neo4j.driver import (
     create_neo4j_driver,
     ensure_vector_index,
 )
+from memory_palace.mcp.enhanced_server import EnhancedMCPServer
 from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
