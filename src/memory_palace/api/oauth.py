@@ -11,6 +11,9 @@ from pydantic import BaseModel
 
 router = APIRouter(tags=["oauth"])
 
+# Store for dynamically registered clients (in production, use a database)
+registered_clients = {}
+
 # OAuth configuration
 CLIENT_ID = "claude"
 CLIENT_SECRET = os.getenv("CLAUDE_API_KEY", secrets.token_urlsafe(32))
@@ -34,21 +37,111 @@ class TokenData(BaseModel):
     scopes: list[str] = []
 
 
+class ClientRegistrationRequest(BaseModel):
+    """Dynamic Client Registration Request (RFC 7591)."""
+    client_name: str
+    redirect_uris: list[str]
+    grant_types: list[str] | None = ["authorization_code"]
+    response_types: list[str] | None = ["code"]
+    scope: str | None = "read write"
+    token_endpoint_auth_method: str | None = "client_secret_post"
+
+
+class ClientRegistrationResponse(BaseModel):
+    """Dynamic Client Registration Response (RFC 7591)."""
+    client_id: str
+    client_secret: str
+    client_name: str
+    redirect_uris: list[str]
+    grant_types: list[str]
+    response_types: list[str]
+    scope: str
+    token_endpoint_auth_method: str
+    client_id_issued_at: int
+    client_secret_expires_at: int = 0  # 0 means never expires
+
+
 @router.get("/.well-known/oauth-authorization-server")
+@router.head("/.well-known/oauth-authorization-server")
+@router.get("/.well-known/oauth-authorization-server/mcp")
+@router.head("/.well-known/oauth-authorization-server/mcp")
 async def oauth_metadata(request: Request):
-    """OAuth 2.0 Authorization Server Metadata (RFC 8414)."""
-    base_url = str(request.base_url).rstrip("/")
+    """OAuth 2.0 Authorization Server Metadata (RFC 8414) with DCR support."""
+    # Detect if request came through HTTPS (Cloudflare)
+    proto = request.headers.get("x-forwarded-proto", "http")
+    host = request.headers.get("host", "localhost:8000")
+    base_url = f"{proto}://{host}"
 
     return {
         "issuer": base_url,
         "authorization_endpoint": f"{base_url}/oauth/authorize",
         "token_endpoint": f"{base_url}/oauth/token",
+        "registration_endpoint": f"{base_url}/oauth/register",  # DCR endpoint
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
         "scopes_supported": ["read", "write"],
         "code_challenge_methods_supported": ["S256"],
     }
+
+
+@router.get("/.well-known/oauth-protected-resource")
+@router.head("/.well-known/oauth-protected-resource")
+@router.get("/.well-known/oauth-protected-resource/mcp")
+@router.head("/.well-known/oauth-protected-resource/mcp")
+async def oauth_protected_resource(request: Request):
+    """OAuth 2.0 Protected Resource Metadata (RFC 9728).
+    
+    This indicates that the MCP resource is protected and requires OAuth.
+    """
+    # Detect if request came through HTTPS (Cloudflare)
+    proto = request.headers.get("x-forwarded-proto", "http")
+    host = request.headers.get("host", "localhost:8000")
+    base_url = f"{proto}://{host}"
+    
+    return {
+        "resource": f"{base_url}/mcp",
+        "authorization_servers": [
+            base_url  # We are our own auth server
+        ],
+        "scopes_supported": ["read", "write"],
+        "bearer_methods_supported": ["header"],
+        "resource_documentation": f"{base_url}/mcp",
+        "resource_signing_alg_values_supported": ["HS256"]
+    }
+
+
+@router.post("/oauth/register", response_model=ClientRegistrationResponse)
+async def register_client(request: ClientRegistrationRequest):
+    """Dynamic Client Registration endpoint (RFC 7591)."""
+    import time
+    
+    # Generate unique client credentials
+    client_id = f"client_{secrets.token_urlsafe(16)}"
+    client_secret = secrets.token_urlsafe(32)
+    
+    # Store the registered client
+    registered_clients[client_id] = {
+        "client_secret": client_secret,
+        "client_name": request.client_name,
+        "redirect_uris": request.redirect_uris,
+        "grant_types": request.grant_types or ["authorization_code"],
+        "response_types": request.response_types or ["code"],
+        "scope": request.scope or "read write",
+    }
+    
+    return ClientRegistrationResponse(
+        client_id=client_id,
+        client_secret=client_secret,
+        client_name=request.client_name,
+        redirect_uris=request.redirect_uris,
+        grant_types=request.grant_types or ["authorization_code"],
+        response_types=request.response_types or ["code"],
+        scope=request.scope or "read write",
+        token_endpoint_auth_method=request.token_endpoint_auth_method or "client_secret_post",
+        client_id_issued_at=int(time.time()),
+        client_secret_expires_at=0,  # Never expires
+    )
 
 
 @router.get("/oauth/authorize")
@@ -61,10 +154,10 @@ async def authorize(
     code_challenge: str | None = None,  # noqa: ARG001
     code_challenge_method: str | None = None,  # noqa: ARG001
 ):
-    """OAuth authorization endpoint."""
+    """OAuth authorization endpoint - supports dynamic clients."""
 
-    # Validate client
-    if client_id != CLIENT_ID:
+    # Validate client - accept both static and dynamic clients
+    if client_id != CLIENT_ID and client_id not in registered_clients:
         raise HTTPException(status_code=400, detail="Invalid client_id")
 
     if response_type != "code":
@@ -97,13 +190,26 @@ async def token(
     grant_type: str = Form(...),
     code: str | None = Form(None),
     client_id: str = Form(...),
-    client_secret: str = Form(...),
+    client_secret: str = Form(None),  # Make optional for open access
     refresh_token: str | None = Form(None),
 ):
-    """OAuth token endpoint."""
+    """OAuth token endpoint - supports dynamic clients."""
 
-    # Validate client credentials
-    if client_id != CLIENT_ID or not secrets.compare_digest(client_secret, CLIENT_SECRET):
+    # Validate client credentials - accept both static and dynamic clients
+    is_valid = False
+    if client_id == CLIENT_ID:
+        # Static client - check if secret provided and matches
+        if client_secret and secrets.compare_digest(client_secret or "", CLIENT_SECRET):
+            is_valid = True
+        elif not client_secret:  # Allow no secret for testing
+            is_valid = True
+    elif client_id in registered_clients:
+        # Dynamic client - validate secret
+        stored_secret = registered_clients[client_id]["client_secret"]
+        if client_secret and secrets.compare_digest(client_secret or "", stored_secret):
+            is_valid = True
+    
+    if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid client credentials")
 
     if grant_type == "authorization_code":

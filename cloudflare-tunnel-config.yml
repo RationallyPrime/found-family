@@ -10,7 +10,13 @@ ingress:
     service: http://localhost:8000
     originRequest:
       noTLSVerify: true
-      connectTimeout: 30s
+      connectTimeout: 120s
+      tcpKeepAlive: 30s
+      noHappyEyeballs: true
+      keepAliveConnections: 1
+      keepAliveTimeout: 120s
+      http2Origin: false  # Disable HTTP/2 for better streaming
+      disableChunkedEncoding: false  # Allow chunked responses for streaming
       
   # Catch-all for other requests
   - service: http_status:404
