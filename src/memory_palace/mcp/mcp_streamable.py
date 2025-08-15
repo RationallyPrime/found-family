@@ -4,21 +4,22 @@ Streamable HTTP transport for MCP - the new standard that Claude.ai requires.
 This replaces the SSE-based fastapi-mcp which is now deprecated.
 """
 
-import json
 import asyncio
-from typing import AsyncIterator, Dict, Any, Optional
-from uuid import uuid4
-from datetime import datetime, UTC
+import contextlib
+import json
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, Request, Response, HTTPException, Depends
+import logfire
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.requests import ClientDisconnect
 
 from memory_palace.api.dependencies import get_memory_service
-from memory_palace.services.memory_service import MemoryService
 from memory_palace.core.logging import get_logger
-import logfire
+from memory_palace.services.memory_service import MemoryService
 
 logger = get_logger(__name__)
 
@@ -30,7 +31,7 @@ class MCPRequest(BaseModel):
     jsonrpc: str = "2.0"
     id: str | int
     method: str
-    params: Dict[str, Any] | None = None
+    params: dict[str, Any] | None = None
 
 
 class MCPResponse(BaseModel):
@@ -38,7 +39,7 @@ class MCPResponse(BaseModel):
     jsonrpc: str = "2.0"
     id: str | int
     result: Any = None
-    error: Dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class MCPServerInfo(BaseModel):
@@ -52,7 +53,7 @@ class MCPTool(BaseModel):
     """MCP tool definition."""
     name: str
     description: str
-    inputSchema: Dict[str, Any]
+    inputSchema: dict[str, Any]
 
 
 # MCP server instance state (in production, use Redis or similar)
@@ -62,11 +63,10 @@ mcp_sessions = {}
 @router.get("/mcp")
 @router.head("/mcp")
 async def mcp_discovery(request: Request):
-    """
-    MCP discovery endpoint for Claude.ai.
-    Returns server capabilities and transport information.
-    Supports both GET and HEAD methods for Claude.ai connectivity checks.
-    """
+    """MCP discovery endpoint for Claude.ai."""
+    
+    client_protocol = request.headers.get("mcp-protocol-version", "2025-06-18")
+    
     # Log all incoming headers for debugging
     headers = dict(request.headers)
     logger.info(
@@ -76,23 +76,26 @@ async def mcp_discovery(request: Request):
         client=request.client.host if request.client else "unknown",
         url=str(request.url)
     )
-    
+
     response = {
         "mcpVersion": "1.0",
-        "protocolVersion": "2025-06-18",  # Add protocol version at root
+        "protocolVersion": client_protocol,  # Use client's protocol version
         "serverInfo": {
             "name": "memory-palace",
             "version": "1.0.0",
-            "description": "Personal memory system for Claude conversations"
+            "protocolVersion": client_protocol
         },
         "capabilities": {
-            "tools": True,
+            "tools": {
+                "listable": True
+            },
             "prompts": False,
             "resources": False,
             "logging": False,
             "sampling": False
         },
-        "transport": {  # Changed from "transports" array to "transport" object
+        # ⚠️ CRITICAL CHANGE: Use "transport" NOT "transports"!
+        "transport": {  # ← SINGULAR, NOT PLURAL!
             "type": "streamable-http",
             "endpoint": "https://memory-palace.sokrates.is/mcp/stream"
         },
@@ -156,14 +159,15 @@ async def mcp_discovery(request: Request):
             }
         ]
     }
-    
+
     logger.info("MCP discovery response sent", response_summary={
         "mcpVersion": response["mcpVersion"],
         "protocolVersion": response["protocolVersion"],
         "transport": response["transport"]["type"],
-        "tools_count": len(response["tools"])
+        "tools_count": len(response["tools"]),
+        "tools_listable": response["capabilities"]["tools"]["listable"]
     })
-    
+
     return response
 
 
@@ -177,7 +181,7 @@ async def stream_handler(
     """
     last_activity = asyncio.get_event_loop().time()
     heartbeat_interval = 30  # Send heartbeat every 30 seconds
-    
+
     async def heartbeat_generator():
         """Generate periodic heartbeat messages to keep connection alive."""
         while True:
@@ -191,37 +195,37 @@ async def stream_handler(
                 )
                 yield json.dumps(heartbeat.dict()) + "\n"
                 logger.debug("Sent heartbeat to keep connection alive")
-    
+
     # Create heartbeat task
     heartbeat_task = asyncio.create_task(heartbeat_generator().__anext__())
-    
+
     try:
         async for mcp_request in request_iterator:
             last_activity = asyncio.get_event_loop().time()
-        try:
-            logger.info(f"MCP request: {mcp_request.method}", extra={
-                "id": mcp_request.id,
-                "method": mcp_request.method
-            })
-            
-            # Handle different MCP methods
-            if mcp_request.method == "initialize":
-                response = MCPResponse(
-                    id=mcp_request.id,
-                    result={
-                        "protocolVersion": "2024-11-05",
-                        "serverInfo": MCPServerInfo().dict(),
-                        "capabilities": {
-                            "tools": {}
+            try:
+                logger.info(f"MCP request: {mcp_request.method}", extra={
+                    "id": mcp_request.id,
+                    "method": mcp_request.method
+                })
+
+                # Handle different MCP methods
+                if mcp_request.method == "initialize":
+                    response = MCPResponse(
+                        id=mcp_request.id,
+                        result={
+                            "protocolVersion": "2024-11-05",
+                            "serverInfo": MCPServerInfo().dict(),
+                            "capabilities": {
+                                "tools": {}
+                            }
                         }
-                    }
-                )
-                
-            elif mcp_request.method == "tools/list":
-                response = MCPResponse(
-                    id=mcp_request.id,
-                    result={
-                        "tools": [
+                    )
+
+                elif mcp_request.method == "tools/list":
+                    response = MCPResponse(
+                        id=mcp_request.id,
+                        result={
+                            "tools": [
                             {
                                 "name": "remember",
                                 "description": "Store a conversation turn in memory",
@@ -251,24 +255,24 @@ async def stream_handler(
                         ]
                     }
                 )
-                
-            elif mcp_request.method == "tools/call":
-                # Extract tool name and arguments
-                params = mcp_request.params or {}
-                tool_name = params.get("name")
-                arguments = params.get("arguments", {})
-                
-                if tool_name == "remember":
-                    # Call the memory service
-                    user_memory, assistant_memory = await memory_service.remember_turn(
-                        user_content=arguments.get("user_content", ""),
-                        assistant_content=arguments.get("assistant_content", ""),
-                        salience=arguments.get("salience", 0.3)
-                    )
-                    
-                    response = MCPResponse(
-                        id=mcp_request.id,
-                        result={
+
+                elif mcp_request.method == "tools/call":
+                    # Extract tool name and arguments
+                    params = mcp_request.params or {}
+                    tool_name = params.get("name")
+                    arguments = params.get("arguments", {})
+
+                    if tool_name == "remember":
+                        # Call the memory service
+                        user_memory, assistant_memory = await memory_service.remember_turn(
+                            user_content=arguments.get("user_content", ""),
+                            assistant_content=arguments.get("assistant_content", ""),
+                            salience=arguments.get("salience", 0.3)
+                        )
+
+                        response = MCPResponse(
+                            id=mcp_request.id,
+                            result={
                             "content": [
                                 {
                                     "type": "text",
@@ -277,25 +281,25 @@ async def stream_handler(
                             ]
                         }
                     )
-                    
-                elif tool_name == "recall":
-                    # Search memories
-                    messages = await memory_service.search_memories(
-                        query=arguments.get("query", ""),
-                        limit=arguments.get("k", 10),
-                        similarity_threshold=arguments.get("threshold", 0.7),
-                        min_salience=arguments.get("min_salience")
-                    )
-                    
-                    # Format results
-                    results = []
-                    for msg in messages:
-                        role = "user" if msg.memory_type.value == "friend_utterance" else "assistant"
-                        results.append(f"[{role}]: {msg.content}")
-                    
-                    response = MCPResponse(
-                        id=mcp_request.id,
-                        result={
+
+                    elif tool_name == "recall":
+                        # Search memories
+                        messages = await memory_service.search_memories(
+                            query=arguments.get("query", ""),
+                            limit=arguments.get("k", 10),
+                            similarity_threshold=arguments.get("threshold", 0.7),
+                            min_salience=arguments.get("min_salience")
+                        )
+
+                        # Format results
+                        results = []
+                        for msg in messages:
+                            role = "user" if msg.memory_type.value == "friend_utterance" else "assistant"
+                            results.append(f"[{role}]: {msg.content}")
+
+                        response = MCPResponse(
+                            id=mcp_request.id,
+                            result={
                             "content": [
                                 {
                                     "type": "text",
@@ -304,48 +308,45 @@ async def stream_handler(
                             ]
                         }
                     )
+                    else:
+                        response = MCPResponse(
+                            id=mcp_request.id,
+                            error={
+                                "code": -32601,
+                                "message": f"Unknown tool: {tool_name}"
+                            }
+                        )
                     
                 else:
+                    # Method not found
                     response = MCPResponse(
                         id=mcp_request.id,
                         error={
                             "code": -32601,
-                            "message": f"Unknown tool: {tool_name}"
+                            "message": f"Method not found: {mcp_request.method}"
                         }
                     )
-                    
-            else:
-                # Method not found
-                response = MCPResponse(
-                    id=mcp_request.id,
+
+                # Stream the response as JSONL
+                yield json.dumps(response.dict()) + "\n"
+                last_activity = asyncio.get_event_loop().time()
+
+            except Exception as e:
+                logger.error(f"MCP handler error: {e}", exc_info=True)
+                error_response = MCPResponse(
+                    id=mcp_request.id if mcp_request else 0,
                     error={
-                        "code": -32601,
-                        "message": f"Method not found: {mcp_request.method}"
+                        "code": -32603,
+                        "message": str(e)
                     }
                 )
-            
-            # Stream the response as JSONL
-            yield json.dumps(response.dict()) + "\n"
-            last_activity = asyncio.get_event_loop().time()
-            
-        except Exception as e:
-            logger.error(f"MCP handler error: {e}", exc_info=True)
-            error_response = MCPResponse(
-                id=mcp_request.id if mcp_request else 0,
-                error={
-                    "code": -32603,
-                    "message": str(e)
-                }
-            )
-            yield json.dumps(error_response.dict()) + "\n"
+                yield json.dumps(error_response.dict()) + "\n"
     finally:
         # Clean up heartbeat task
         if 'heartbeat_task' in locals():
             heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-            except asyncio.CancelledError:
-                pass
 
 
 async def parse_request_stream(request: Request) -> AsyncIterator[MCPRequest]:
@@ -356,12 +357,12 @@ async def parse_request_stream(request: Request) -> AsyncIterator[MCPRequest]:
     try:
         async for chunk in request.stream():
             buffer += chunk.decode('utf-8')
-            
+
             # Process complete lines
             while '\n' in buffer:
                 line, buffer = buffer.split('\n', 1)
                 line = line.strip()
-                
+
                 if line:
                     try:
                         data = json.loads(line)
@@ -386,12 +387,12 @@ async def mcp_stream(
     """
     Streamable HTTP endpoint for MCP.
     This is the new transport that Claude.ai requires.
-    
+
     Accepts JSONL requests and returns JSONL responses.
     """
     # Log detailed request information for debugging
     headers = dict(request.headers)
-    
+
     # Check for Cloudflare headers
     cf_headers = {
         "cf-ray": headers.get("cf-ray"),
@@ -402,10 +403,10 @@ async def mcp_stream(
         "x-forwarded-proto": headers.get("x-forwarded-proto"),
         "x-real-ip": headers.get("x-real-ip")
     }
-    
+
     # Determine if request came through Cloudflare
     via_cloudflare = any(cf_headers.get(k) for k in ["cf-ray", "cf-connecting-ip"])
-    
+
     logger.info(
         "MCP stream connection initiated",
         headers=headers,
@@ -416,17 +417,17 @@ async def mcp_stream(
         via_cloudflare=via_cloudflare,
         cf_headers={k: v for k, v in cf_headers.items() if v}
     )
-    
+
     # Track connection start time
     connection_start = datetime.now(UTC)
-    
+
     try:
         # Parse the incoming request stream
         request_stream = parse_request_stream(request)
-        
+
         # Handle requests and generate responses
         response_stream = stream_handler(request_stream, memory_service)
-        
+
         # Return streaming response with correct content type
         return StreamingResponse(
             response_stream,
@@ -451,7 +452,7 @@ async def mcp_stream(
 @router.post("/mcp/test")
 async def test_mcp_tools(
     tool: str,
-    args: Dict[str, Any],
+    args: dict[str, Any],
     memory_service: MemoryService = Depends(get_memory_service)
 ):
     """Test MCP tools directly without the streaming protocol."""
@@ -462,7 +463,7 @@ async def test_mcp_tools(
             salience=args.get("salience", 0.3)
         )
         return {"turn_id": str(assistant_memory.id)}
-    
+
     elif tool == "recall":
         messages = await memory_service.search_memories(
             query=args.get("query", ""),
@@ -480,6 +481,6 @@ async def test_mcp_tools(
                 for msg in messages
             ]
         }
-    
+
     else:
         raise HTTPException(status_code=404, detail=f"Unknown tool: {tool}")
