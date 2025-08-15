@@ -79,6 +79,7 @@ async def mcp_discovery(request: Request):
     
     response = {
         "mcpVersion": "1.0",
+        "protocolVersion": "2025-06-18",  # Add protocol version at root
         "serverInfo": {
             "name": "memory-palace",
             "version": "1.0.0",
@@ -91,12 +92,10 @@ async def mcp_discovery(request: Request):
             "logging": False,
             "sampling": False
         },
-        "transports": [
-            {
-                "type": "streamable-http",
-                "endpoint": "https://memory-palace.sokrates.is/mcp/stream"
-            }
-        ],
+        "transport": {  # Changed from "transports" array to "transport" object
+            "type": "streamable-http",
+            "endpoint": "https://memory-palace.sokrates.is/mcp/stream"
+        },
         "tools": [
             {
                 "name": "remember",
@@ -160,7 +159,8 @@ async def mcp_discovery(request: Request):
     
     logger.info("MCP discovery response sent", response_summary={
         "mcpVersion": response["mcpVersion"],
-        "transport": response["transports"][0]["type"],
+        "protocolVersion": response["protocolVersion"],
+        "transport": response["transport"]["type"],
         "tools_count": len(response["tools"])
     })
     
