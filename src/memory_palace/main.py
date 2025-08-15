@@ -27,7 +27,8 @@ from memory_palace.infrastructure.neo4j.driver import (
     create_neo4j_driver,
     ensure_vector_index,
 )
-from memory_palace.mcp.enhanced_server import EnhancedMCPServer
+from fastapi_mcp import FastApiMCP
+from memory_palace.mcp.mcp_streamable import router as mcp_streamable_router
 from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
@@ -151,18 +152,20 @@ app.add_middleware(
 
 # Import endpoint routers
 
-# Mount API routers
+# IMPORTANT: Mount streamable MCP first to take precedence over fastapi-mcp
+# Mount the new Streamable HTTP MCP transport for Claude.ai
+app.include_router(mcp_streamable_router, tags=["mcp"])
+
+# Keep the SSE transport for local Claude Code (but not HTTP which conflicts)
+mcp = FastApiMCP(app)
+mcp.mount_sse()   # SSE transport at /sse for local Claude Code ONLY
+
+# Mount API routers after MCP to avoid conflicts
 app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
 app.include_router(unified_query.router, prefix="/api/v1/unified", tags=["unified_query"])
 app.include_router(core.router)
 app.include_router(admin.router)
 app.include_router(oauth_router)
-
-# Add MCP support with both transports using our enhanced server
-# HTTP for Claude.ai remote access, SSE for local Claude Code
-mcp = EnhancedMCPServer(app)
-mcp.mount_http()  # HTTP transport at /mcp for Claude.ai
-mcp.mount_sse()   # SSE transport at /sse for local Claude Code
 
 
 # Note: get_memory_service is imported from dependencies module
