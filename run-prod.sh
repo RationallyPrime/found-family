@@ -96,6 +96,10 @@ if [ ! -z "$CLOUDFLARE_URL" ]; then
     echo -e "    Claude.ai MCP: ${CYAN}${MCP_URL}${NC}"
 fi
 
+echo -e "\n  ${GREEN}MCP Integrations:${NC}"
+echo -e "    Claude.ai Web: ${CYAN}Streamable HTTP at /mcp${NC}"
+echo -e "    Claude Code:   ${GREEN}Stdio transport via .mcp.json${NC}"
+
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "\n${YELLOW}Press Ctrl+C to stop all services${NC}\n"
 

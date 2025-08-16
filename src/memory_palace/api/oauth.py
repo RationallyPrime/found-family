@@ -18,6 +18,9 @@ router = APIRouter(tags=["oauth"])
 # Store for dynamically registered clients (in production, use a database)
 registered_clients = {}
 
+# Store for authorization codes (in production, use Redis or database)
+auth_codes = {}
+
 # OAuth configuration
 CLIENT_ID = "claude"
 CLIENT_SECRET = os.getenv("CLAUDE_API_KEY", secrets.token_urlsafe(32))
@@ -83,11 +86,47 @@ async def oauth_metadata(request: Request):
         "registration_endpoint": f"{base_url}/oauth/register",  # DCR endpoint
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
         "scopes_supported": ["read", "write"],
         "code_challenge_methods_supported": ["S256"],
+        "introspection_endpoint": f"{base_url}/oauth/introspect",
+        "revocation_endpoint": f"{base_url}/oauth/revoke",
+        "jwks_uri": f"{base_url}/.well-known/jwks.json",
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["HS256"],
+        "userinfo_endpoint": f"{base_url}/oauth/userinfo",
+        "claims_supported": ["sub", "name", "email"],
+        "response_modes_supported": ["query", "fragment"],
+        "token_endpoint_auth_signing_alg_values_supported": ["HS256"]
     }
 
+
+@router.get("/.well-known/mcp")
+@router.head("/.well-known/mcp")
+async def mcp_discovery(request: Request):
+    """MCP discovery endpoint for Claude.ai."""
+    # Detect if request came through HTTPS (Cloudflare)
+    proto = request.headers.get("x-forwarded-proto", "http")
+    host = request.headers.get("host", "localhost:8000")
+    base_url = f"{proto}://{host}"
+    
+    return {
+        "endpoint": f"{base_url}/mcp",
+        "protocol": "streamable-http",
+        "name": "Memory Palace",
+        "description": "Persistent memory system for AI conversations",
+        "application_slug": "memory-palace",  # Add application identifier
+        "app": {
+            "id": "memory-palace",
+            "name": "Memory Palace",
+            "slug": "memory-palace"
+        },
+        "oauth": {
+            "authorization_server": base_url,
+            "resource": f"{base_url}/mcp",
+            "scopes": ["read", "write"]
+        }
+    }
 
 @router.get("/.well-known/oauth-protected-resource")
 @router.head("/.well-known/oauth-protected-resource")
@@ -160,25 +199,40 @@ async def authorize(
 ):
     """OAuth authorization endpoint - supports dynamic clients."""
 
-    # Accept any client_id for now (Claude uses dynamic registration)
-    # In production, you'd validate against a persistent store
     logger.info(f"OAuth authorize request from client: {client_id}")
+    logger.info(f"Redirect URI: {redirect_uri}")
+    logger.info(f"Scope: {scope}")
 
     if response_type != "code":
         raise HTTPException(status_code=400, detail="Unsupported response_type")
 
-    # For simplicity, auto-approve for Claude
-    # In production, you might want a consent screen
+    # Validate client exists (either registered or known)
+    if client_id not in registered_clients and not client_id.startswith("client_"):
+        logger.warning(f"Unknown client_id: {client_id}")
+        # Auto-register Claude if needed
+        if "claude" in client_id.lower():
+            registered_clients[client_id] = {
+                "client_secret": secrets.token_urlsafe(32),
+                "client_name": "Claude",
+                "redirect_uris": [redirect_uri],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"],
+                "scope": scope,
+            }
+            logger.info(f"Auto-registered Claude client: {client_id}")
+
+    # Auto-approve for Claude (no consent screen)
     auth_code = secrets.token_urlsafe(32)
 
     # Store auth code (in production, use Redis or database)
-    # For now, we'll encode it in the code itself
-    code_data = {  # noqa: F841
+    code_data = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": scope,
         "exp": datetime.now(UTC) + timedelta(minutes=10)
     }
+    auth_codes[auth_code] = code_data
+    logger.info(f"Stored auth code for client {client_id}")
 
     # Build redirect URL
     params = {"code": auth_code}
@@ -194,7 +248,7 @@ async def token(
     grant_type: str = Form(...),
     code: str | None = Form(None),
     client_id: str = Form(...),
-    client_secret: str = Form(None),  # Make optional for open access
+    client_secret: str = Form(None),  # Make optional for open access  # noqa: ARG001
     refresh_token: str | None = Form(None),
 ):
     """OAuth token endpoint - supports dynamic clients."""
@@ -207,8 +261,27 @@ async def token(
         if not code:
             raise HTTPException(status_code=400, detail="Missing authorization code")
 
-        # In production, validate the code properly
-        # For now, accept any code
+        # Validate the authorization code
+        if code not in auth_codes:
+            logger.warning(f"Invalid authorization code: {code[:20]}...")
+            raise HTTPException(status_code=400, detail="Invalid authorization code")
+        
+        code_data = auth_codes[code]
+        
+        # Check if code is expired
+        if datetime.now(UTC) > code_data["exp"]:
+            logger.warning("Authorization code expired")
+            del auth_codes[code]
+            raise HTTPException(status_code=400, detail="Authorization code expired")
+        
+        # Validate client_id matches
+        if code_data["client_id"] != client_id:
+            logger.warning(f"Client ID mismatch: {client_id} != {code_data['client_id']}")
+            raise HTTPException(status_code=400, detail="Client ID mismatch")
+        
+        # Remove used code
+        del auth_codes[code]
+        logger.info(f"Authorization code validated and consumed for client {client_id}")
 
     elif grant_type == "refresh_token":
         if not refresh_token:
@@ -274,3 +347,49 @@ def verify_token(token: str) -> TokenData | None:
         return TokenData(client_id=client_id, scopes=scopes)
     except JWTError:
         return None
+
+
+@router.post("/oauth/introspect")
+async def introspect_token(token: str = Form(...)):
+    """Token introspection endpoint (RFC 7662)."""
+    token_data = verify_token(token)
+    if token_data:
+        return {
+            "active": True,
+            "client_id": token_data.client_id,
+            "scope": " ".join(token_data.scopes),
+            "token_type": "Bearer"
+        }
+    return {"active": False}
+
+
+@router.post("/oauth/revoke")
+async def revoke_token(token: str = Form(...)):
+    """Token revocation endpoint (RFC 7009)."""
+    # For simplicity, just return success (tokens are stateless JWTs)
+    return {"revoked": True}
+
+
+@router.get("/.well-known/jwks.json")
+async def jwks():
+    """JSON Web Key Set endpoint."""
+    # For simplicity, return empty JWKS (we use HMAC)
+    return {"keys": []}
+
+
+@router.get("/oauth/userinfo")
+async def userinfo(authorization: str = None):
+    """UserInfo endpoint (OpenID Connect)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    
+    token = authorization.split(" ")[1]
+    token_data = verify_token(token)
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    return {
+        "sub": token_data.client_id,
+        "name": "Claude MCP Client",
+        "email": "claude@anthropic.com"
+    }

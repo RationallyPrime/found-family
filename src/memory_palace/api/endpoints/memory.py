@@ -44,7 +44,7 @@ class StoreTurnRequest(BaseModel):
     @field_validator('salience')
     @classmethod
     def validate_salience(cls, v):
-        if v is not None and not isinstance(v, (int, float)):
+        if v is not None and not isinstance(v, int | float):
             raise ValueError(
                 "Salience must be a number between 0.0 and 1.0. "
                 "Examples: 0.5 for normal, 0.8 for important. "
