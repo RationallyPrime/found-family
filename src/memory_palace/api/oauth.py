@@ -110,7 +110,11 @@ async def mcp_discovery(request: Request):
     host = request.headers.get("host", "localhost:8000")
     base_url = f"{proto}://{host}"
     
+    # Get protocol version from header or use latest
+    protocol_version = request.headers.get("mcp-protocol-version", "2024-11-05")
+    
     return {
+        "protocolVersion": protocol_version,
         "endpoint": f"{base_url}/mcp",
         "protocol": "streamable-http",
         "name": "Memory Palace",
@@ -393,3 +397,5 @@ async def userinfo(authorization: str = None):
         "name": "Claude MCP Client",
         "email": "claude@anthropic.com"
     }
+
+

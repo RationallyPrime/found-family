@@ -22,7 +22,7 @@ cleanup() {
 # Trap Ctrl+C and cleanup
 trap cleanup INT TERM
 
-echo -e "${GREEN}🚀 Starting Memory Palace (Production Mode with Tailscale)${NC}"
+echo -e "${GREEN}🚀 Starting Memory Palace (Production Mode)${NC}"
 echo ""
 
 # Check if .env exists
@@ -33,21 +33,6 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check for Tailscale auth key
-if ! grep -q "TAILSCALE_AUTHKEY=" .env || grep -q "TAILSCALE_AUTHKEY=$" .env || grep -q "TAILSCALE_AUTHKEY=\"\"" .env; then
-    echo -e "${RED}❌ Error: TAILSCALE_AUTHKEY not set in .env!${NC}"
-    echo -e "${YELLOW}To get an auth key:${NC}"
-    echo "  1. Go to https://login.tailscale.com/admin/settings/keys"
-    echo "  2. Click 'Generate auth key'"
-    echo "  3. Select: Reusable=Yes, Pre-authorized=Yes, Expiration=90 days"
-    echo "  4. Add to .env: TAILSCALE_AUTHKEY=tskey-auth-xxxxx"
-    echo ""
-    read -p "Do you want to continue without Tailscale? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-fi
 
 # Build the image if needed
 echo -e "${BLUE}Building Docker image...${NC}"
