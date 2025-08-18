@@ -26,7 +26,7 @@ async def root():
     }
 
 
-@router.get("/health")
+@router.get("/health", operation_id="health")
 async def health_check():
     """Health check endpoint."""
     return {

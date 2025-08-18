@@ -25,7 +25,7 @@ class StoreTurnRequest(BaseModel):
 
     # Incremental ontology support
     ontology_path: list[str] | None = None
-    
+
     # Memory importance/salience (0.0-1.0 scale)
     # Recalibrated scale (since we only store things worth remembering):
     #   0.0-0.2: Background context, ambient information
@@ -38,9 +38,9 @@ class StoreTurnRequest(BaseModel):
         None,
         ge=0.0,
         le=1.0,
-        description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number not text."
+        description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number"
     )
-    
+
     @field_validator('salience')
     @classmethod
     def validate_salience(cls, v):
@@ -80,7 +80,7 @@ class SearchResponse(BaseModel):
     count: int
 
 
-@router.post("/remember", response_model=StoreTurnResponse)
+@router.post("/remember", response_model=StoreTurnResponse, operation_id="remember")
 async def remember_turn(
     request: StoreTurnRequest,
     memory_service: MemoryService = Depends(get_memory_service),
@@ -115,7 +115,7 @@ async def remember_turn(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/recall", response_model=SearchResponse)
+@router.post("/recall", response_model=SearchResponse, operation_id="recall")
 async def recall_memories(
     request: SearchRequest,
     memory_service: MemoryService = Depends(get_memory_service),
@@ -156,7 +156,7 @@ async def recall_memories(
                 msg_dict["role"] = settings.claude_name
             else:
                 msg_dict["role"] = msg.memory_type.value
-            
+
             message_dicts.append(msg_dict)
 
         logger.info("Search completed", extra={
@@ -178,7 +178,3 @@ async def recall_memories(
             }
         )
         raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-
-

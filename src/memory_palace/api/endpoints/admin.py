@@ -42,7 +42,7 @@ async def get_neo4j_driver():
     return neo4j_driver
 
 
-@router.get("/jobs/status", response_model=JobStatusResponse)
+@router.get("/jobs/status", response_model=JobStatusResponse, operation_id="job_status")
 async def get_job_status(
     orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)
 ):
@@ -60,7 +60,7 @@ async def get_job_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/jobs/trigger/{job_id}")
+@router.post("/jobs/trigger/{job_id}", operation_id="trigger")
 async def trigger_job(
     job_id: str,
     orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)
@@ -85,7 +85,7 @@ async def trigger_job(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/cache/stats")
+@router.get("/cache/stats", operation_id="cache_stats")
 async def get_cache_stats(driver: AsyncDriver = Depends(get_neo4j_driver)):
     """Get basic statistics about the embedding cache."""
     async with driver.session() as session:

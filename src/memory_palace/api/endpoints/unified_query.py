@@ -209,30 +209,33 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
         # Remove 'type' from the dict before passing to constructors
         filter_data = {k: v for k, v in filter_spec.items() if k != "type"}
         
-        if filter_type == "salience":
-            filter_spec = SalienceFilter(**filter_data)
-        elif filter_type == "topic":
-            filter_spec = TopicFilter(**filter_data)
-        elif filter_type == "conversation":
-            filter_spec = ConversationFilter(**filter_data)
-        elif filter_type == "recency":
-            filter_spec = RecencyFilter(**filter_data)
-        elif filter_type == "emotional":
-            filter_spec = EmotionalFilter(**filter_data)
-        elif filter_type == "ontology":
-            filter_spec = OntologyFilter(**filter_data)
-        elif filter_type == "concepts":
-            filter_spec = ConceptFilter(**filter_data)
-        elif filter_type == "frequency":
-            filter_spec = FrequencyFilter(**filter_data)
-        elif filter_type == "decay":
-            filter_spec = DecayFilter(**filter_data)
-        elif filter_type == "related":
-            filter_spec = RelationshipFilter(**filter_data)
-        elif filter_type == "composite":
-            filter_spec = CompositeFilter(**filter_data)
-        else:
-            raise ValueError(f"Unknown filter type: {filter_type}")
+        try:
+            if filter_type == "salience":
+                filter_spec = SalienceFilter(**filter_data)
+            elif filter_type == "topic":
+                filter_spec = TopicFilter(**filter_data) #ty:ignore
+            elif filter_type == "conversation":
+                filter_spec = ConversationFilter(**filter_data) #ty:ignore
+            elif filter_type == "recency":
+                filter_spec = RecencyFilter(**filter_data)
+            elif filter_type == "emotional":
+                filter_spec = EmotionalFilter(**filter_data)
+            elif filter_type == "ontology":
+                filter_spec = OntologyFilter(**filter_data) #ty:ignore
+            elif filter_type == "concepts":
+                filter_spec = ConceptFilter(**filter_data) #ty:ignore
+            elif filter_type == "frequency":
+                filter_spec = FrequencyFilter(**filter_data)
+            elif filter_type == "decay":
+                filter_spec = DecayFilter(**filter_data)
+            elif filter_type == "related":
+                filter_spec = RelationshipFilter(**filter_data) #ty:ignore
+            elif filter_type == "composite":
+                filter_spec = CompositeFilter(**filter_data) #ty:ignore
+            else:
+                raise ValueError(f"Unknown filter type: {filter_type}")
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid filter data for {filter_type}: {e}") from e
     
     if isinstance(filter_spec, CompositeFilter):
         # Recursively build composite specifications
@@ -301,7 +304,7 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
         raise ValueError(f"Unknown filter type: {type(filter_spec)}")
 
 
-@router.post("/query", response_model=UnifiedQueryResponse)
+@router.post("/query", response_model=UnifiedQueryResponse, operation_id="query")
 async def execute_unified_query(
     request: UnifiedQueryRequest,
     memory_service: MemoryService = Depends(get_memory_service),

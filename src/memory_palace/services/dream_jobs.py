@@ -1,15 +1,16 @@
-import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from memory_palace.core.logging import get_logger
 
 if TYPE_CHECKING:
     from neo4j import AsyncDriver
 
     from memory_palace.services import ClusteringService, EmbeddingService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DreamJobOrchestrator:

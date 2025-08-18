@@ -1,13 +1,13 @@
-import logging
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from neo4j import AsyncSession
 
+from memory_palace.core.logging import get_logger
 from memory_palace.domain.models.base import GraphModel
 from memory_palace.domain.models.memories import Memory
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 T = TypeVar("T", bound=GraphModel)
 

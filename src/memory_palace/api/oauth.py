@@ -4,6 +4,7 @@ import os
 import secrets
 from datetime import UTC, datetime, timedelta
 
+import logfire
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
@@ -68,9 +69,9 @@ class ClientRegistrationResponse(BaseModel):
     client_secret_expires_at: int = 0  # 0 means never expires
 
 
-@router.get("/.well-known/oauth-authorization-server")
+@router.get("/.well-known/oauth-authorization-server", operation_id="oauth_metadata")
 @router.head("/.well-known/oauth-authorization-server")
-@router.get("/.well-known/oauth-authorization-server/mcp")
+@router.get("/.well-known/oauth-authorization-server/mcp", operation_id="oauth_metadata_mcp")
 @router.head("/.well-known/oauth-authorization-server/mcp")
 async def oauth_metadata(request: Request):
     """OAuth 2.0 Authorization Server Metadata (RFC 8414) with DCR support."""
@@ -101,7 +102,7 @@ async def oauth_metadata(request: Request):
     }
 
 
-@router.get("/.well-known/mcp")
+@router.get("/.well-known/mcp", operation_id="mcp_discovery")
 @router.head("/.well-known/mcp")
 async def mcp_discovery(request: Request):
     """MCP discovery endpoint for Claude.ai."""
@@ -112,29 +113,58 @@ async def mcp_discovery(request: Request):
     
     # Get protocol version from header or use latest
     protocol_version = request.headers.get("mcp-protocol-version", "2024-11-05")
+    user_agent = request.headers.get("user-agent", "")[:100]
     
-    return {
-        "protocolVersion": protocol_version,
-        "endpoint": f"{base_url}/mcp",
-        "protocol": "streamable-http",
-        "name": "Memory Palace",
-        "description": "Persistent memory system for AI conversations",
-        "application_slug": "memory-palace",  # Add application identifier
-        "app": {
-            "id": "memory-palace",
+    with logfire.span("MCP discovery for {client}", client=user_agent) as span:
+        # Set span attributes for debugging
+        span.set_attributes({
+            "mcp.protocol_version": protocol_version,
+            "mcp.base_url": base_url,
+            "request.proto": proto,
+            "request.host": host,
+            "request.user_agent": user_agent,
+            "cloudflare.forwarded_proto": request.headers.get("x-forwarded-proto"),
+            "mcp.transport_protocol": "streamable-http"
+        })
+        
+        # Structured logging for debugging
+        logger.info("MCP discovery request", 
+                   protocol_version=protocol_version,
+                   base_url=base_url,
+                   client_user_agent=user_agent,
+                   forwarded_proto=proto,
+                   transport_protocol="streamable-http")
+        
+        discovery_response = {
+            "protocolVersion": protocol_version,
+            "endpoint": f"{base_url}/mcp",
+            "protocol": "streamable-http",
             "name": "Memory Palace",
-            "slug": "memory-palace"
-        },
-        "oauth": {
-            "authorization_server": base_url,
-            "resource": f"{base_url}/mcp",
-            "scopes": ["read", "write"]
+            "description": "Persistent memory system for AI conversations",
+            "application_slug": "memory-palace",
+            "app": {
+                "id": "memory-palace",
+                "name": "Memory Palace",
+                "slug": "memory-palace"
+            },
+            "oauth": {
+                "authorization_server": base_url,
+                "resource": f"{base_url}/mcp",
+                "scopes": ["read", "write"]
+            }
         }
-    }
+        
+        # Log the response for debugging
+        logger.info("MCP discovery response", 
+                   endpoint=discovery_response["endpoint"],
+                   protocol=discovery_response["protocol"],
+                   oauth_server=discovery_response["oauth"]["authorization_server"])
+        
+        return discovery_response
 
-@router.get("/.well-known/oauth-protected-resource")
+@router.get("/.well-known/oauth-protected-resource", operation_id="oauth_resource")
 @router.head("/.well-known/oauth-protected-resource")
-@router.get("/.well-known/oauth-protected-resource/mcp")
+@router.get("/.well-known/oauth-protected-resource/mcp", operation_id="oauth_resource_mcp")
 @router.head("/.well-known/oauth-protected-resource/mcp")
 async def oauth_protected_resource(request: Request):
     """OAuth 2.0 Protected Resource Metadata (RFC 9728).
@@ -158,7 +188,7 @@ async def oauth_protected_resource(request: Request):
     }
 
 
-@router.post("/oauth/register", response_model=ClientRegistrationResponse)
+@router.post("/oauth/register", response_model=ClientRegistrationResponse, operation_id="register")
 async def register_client(request: ClientRegistrationRequest):
     """Dynamic Client Registration endpoint (RFC 7591)."""
     import time
@@ -191,7 +221,8 @@ async def register_client(request: ClientRegistrationRequest):
     )
 
 
-@router.get("/oauth/authorize")
+@router.get("/oauth/authorize", operation_id="authorize_get")
+@logfire.instrument()
 async def authorize(
     response_type: str,
     client_id: str,
@@ -202,10 +233,14 @@ async def authorize(
     code_challenge_method: str | None = None,  # noqa: ARG001
 ):
     """OAuth authorization endpoint - supports dynamic clients."""
-
-    logger.info(f"OAuth authorize request from client: {client_id}")
-    logger.info(f"Redirect URI: {redirect_uri}")
-    logger.info(f"Scope: {scope}")
+    
+    # Structured logging for OAuth flow debugging
+    logger.info("OAuth authorization request",
+               client_id=client_id,
+               response_type=response_type,
+               redirect_uri=redirect_uri,
+               scope=scope,
+               has_pkce=bool(code_challenge))
 
     if response_type != "code":
         raise HTTPException(status_code=400, detail="Unsupported response_type")
@@ -247,7 +282,7 @@ async def authorize(
     return RedirectResponse(url=redirect_url)
 
 
-@router.post("/oauth/token", response_model=TokenResponse)
+@router.post("/oauth/token", response_model=TokenResponse, operation_id="token")
 async def token(
     grant_type: str = Form(...),
     code: str | None = Form(None),
@@ -323,10 +358,7 @@ async def token(
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create a JWT access token."""
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
-    else:
-        expire = datetime.now(UTC) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + expires_delta if expires_delta else datetime.now(UTC) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -353,7 +385,7 @@ def verify_token(token: str) -> TokenData | None:
         return None
 
 
-@router.post("/oauth/introspect")
+@router.post("/oauth/introspect", operation_id="introspect")
 async def introspect_token(token: str = Form(...)):
     """Token introspection endpoint (RFC 7662)."""
     token_data = verify_token(token)
@@ -367,22 +399,22 @@ async def introspect_token(token: str = Form(...)):
     return {"active": False}
 
 
-@router.post("/oauth/revoke")
+@router.post("/oauth/revoke", operation_id="revoke")
 async def revoke_token(token: str = Form(...)):
     """Token revocation endpoint (RFC 7009)."""
     # For simplicity, just return success (tokens are stateless JWTs)
     return {"revoked": True}
 
 
-@router.get("/.well-known/jwks.json")
+@router.get("/.well-known/jwks.json", operation_id="jwks")
 async def jwks():
     """JSON Web Key Set endpoint."""
     # For simplicity, return empty JWKS (we use HMAC)
     return {"keys": []}
 
 
-@router.get("/oauth/userinfo")
-async def userinfo(authorization: str = None):
+@router.get("/oauth/userinfo", operation_id="userinfo")
+async def userinfo(authorization: str = ""):
     """UserInfo endpoint (OpenID Connect)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")

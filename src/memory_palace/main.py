@@ -14,11 +14,12 @@ import logfire
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_mcp import FastApiMCP
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
 from memory_palace.api.endpoints import admin, core, memory, unified_query
-from memory_palace.api.oauth import router as oauth_router
+from memory_palace.api import oauth
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.cache import EmbeddingCache
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
@@ -27,16 +28,22 @@ from memory_palace.infrastructure.neo4j.driver import (
     create_neo4j_driver,
     ensure_vector_index,
 )
-from memory_palace.mcp.mcp_server import MemoryPalaceMCPServer
 from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 
-# Disable Logfire for now to avoid auth issues
-# logfire.configure(
-#     service_name="memory-palace",
-#     token=os.getenv("LOGFIRE_TOKEN")
-# )
+# Enhanced Logfire configuration with proper instrumentation
+logfire.configure(
+    service_name="memory-palace",
+    token=os.getenv("LOGFIRE_TOKEN")
+)
+
+# Install auto-tracing with ignore for already imported modules
+logfire.install_auto_tracing(
+    modules=['memory_palace'],
+    min_duration=0.01,  # Only trace operations over 0.01 seconds
+    check_imported_modules='ignore'  # Ignore already imported modules
+)
 setup_logging()
 logger = get_logger(__name__)
 
@@ -46,13 +53,12 @@ dream_orchestrator: DreamJobOrchestrator | None = None
 neo4j_driver: AsyncDriver | None = None
 embedding_service: VoyageEmbeddingService | None = None
 clustering_service: DBSCANClusteringService | None = None
-mcp_server: MemoryPalaceMCPServer | None = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifecycle manager with DreamJobOrchestrator integration."""
-    global memory_service, dream_orchestrator, neo4j_driver, embedding_service, clustering_service, mcp_server
+    global memory_service, dream_orchestrator, neo4j_driver, embedding_service, clustering_service
 
     logger.info("🧠 Starting Memory Palace application...")
 
@@ -98,31 +104,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         await dream_orchestrator.start()
 
-        # Initialize MCP Server
-        logger.info("🌐 Starting MCP Server...")
-        mcp_server = MemoryPalaceMCPServer(base_url="http://localhost:8000")
-        mcp_server.create_session_manager()
-        
-        # Mount the MCP server to the FastAPI app
-        from starlette.routing import Mount
-        app.router.routes.append(
-            Mount("/mcp", app=mcp_server.session_manager.handle_request)
-        )
-        
-        # Start the MCP server's session manager
-        async with mcp_server.run():
-            logger.info("✅ Memory Palace application started successfully!")
-            logger.info("🔄 Background memory management is now active")
-            logger.info("🌐 MCP Server ready for connections at /mcp")
+        logger.info("✅ Memory Palace application started successfully!")
+        logger.info("🔄 Background memory management is now active")
 
-            # Print job status
-            # if dream_orchestrator:
-            #     status = dream_orchestrator.get_job_status()
-            #     logger.info(f"📅 Scheduled jobs: {len(status['jobs'])}")
-            #     for job in status['jobs']:
-            #         logger.info(f"   - {job['id']}: next run at {job['next_run']}")
+        # Print job status
+        # if dream_orchestrator:
+        #     status = dream_orchestrator.get_job_status()
+        #     logger.info(f"📅 Scheduled jobs: {len(status['jobs'])}")
+        #     for job in status['jobs']:
+        #         logger.info(f"   - {job['id']}: next run at {job['next_run']}")
 
-            yield  # Application is running
+        yield  # Application is running
 
     except Exception as e:
         logger.error(f"❌ Failed to start Memory Palace: {e}", exc_info=True)
@@ -153,8 +145,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Disable Logfire instrumentation for now
-# logfire.instrument_fastapi(app)
+# Enable FastAPI instrumentation for request tracing
+logfire.instrument_fastapi(app)
 
 # Add CORS middleware
 app.add_middleware(
@@ -170,9 +162,11 @@ app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
 app.include_router(unified_query.router, prefix="/api/v1/unified", tags=["unified_query"])
 app.include_router(core.router)
 app.include_router(admin.router)
-app.include_router(oauth_router)
+app.include_router(oauth.router)  # Include OAuth endpoints for Claude.ai MCP
 
-# We'll add MCP mount after initialization in lifespan
+# Add MCP support  
+mcp = FastApiMCP(app)
+mcp.mount_http()  # Creates MCP server at /mcp with HTTPS support
 
 
 if __name__ == "__main__":

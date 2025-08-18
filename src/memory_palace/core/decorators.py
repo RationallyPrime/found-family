@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import logging
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, ParamSpec, Protocol, TypeVar, cast
@@ -10,8 +9,9 @@ from typing import Any, ParamSpec, Protocol, TypeVar, cast
 from .base import ApplicationError, ErrorLevel
 from .error_context import ErrorContextManager
 from .handlers import ErrorHandler
+from .logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 P = ParamSpec("P")
 T = TypeVar("T")
 

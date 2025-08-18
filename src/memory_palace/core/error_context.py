@@ -1,6 +1,5 @@
 """Error context management"""
 
-import logging
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Any
@@ -9,8 +8,9 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from .base import ApplicationError
+from .logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ErrorContext:
