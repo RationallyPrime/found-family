@@ -17,7 +17,7 @@ embedding_service: VoyageEmbeddingService | None = None
 clustering_service: DBSCANClusteringService | None = None
 
 
-async def get_memory_service() -> AsyncGenerator[MemoryService, None]:
+async def get_memory_service() -> AsyncGenerator[MemoryService]:
     """Get memory service instance with per-request session and proper cleanup.
     
     Uses async generator pattern to ensure session is properly closed after request.

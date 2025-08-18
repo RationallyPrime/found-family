@@ -1,13 +1,13 @@
 """Memory API endpoints."""
 
-import traceback
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.config import settings
+from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
 from memory_palace.services.memory_service import MemoryService
 
@@ -81,100 +81,79 @@ class SearchResponse(BaseModel):
 
 
 @router.post("/remember", response_model=StoreTurnResponse, operation_id="remember")
+@with_error_handling(reraise=True)
 async def remember_turn(
     request: StoreTurnRequest,
-    memory_service: MemoryService = Depends(get_memory_service),  # noqa: B008
+    memory_service: MemoryService = Depends(get_memory_service),
 ) -> StoreTurnResponse:
     """Store a conversation turn in memory."""
-    try:
-        logger.info("Storing conversation turn", extra={
-            "user_content_length": len(request.user_content),
-            "assistant_content_length": len(request.assistant_content),
-            "conversation_id": str(request.conversation_id) if request.conversation_id else None
-        })
+    logger.info("Storing conversation turn", extra={
+        "user_content_length": len(request.user_content),
+        "assistant_content_length": len(request.assistant_content),
+        "conversation_id": str(request.conversation_id) if request.conversation_id else None
+    })
 
-        user_memory, assistant_memory = await memory_service.remember_turn(
-            user_content=request.user_content,
-            assistant_content=request.assistant_content,
-            conversation_id=request.conversation_id,
-            salience=request.salience,  # Pass through the importance rating
-        )
+    user_memory, assistant_memory = await memory_service.remember_turn(
+        user_content=request.user_content,
+        assistant_content=request.assistant_content,
+        conversation_id=request.conversation_id,
+        salience=request.salience,  # Pass through the importance rating
+    )
 
-        # Use the assistant memory ID as the turn ID since that's the "response" part
-        logger.info("Successfully stored turn", extra={"turn_id": str(assistant_memory.id)})
-        return StoreTurnResponse(turn_id=assistant_memory.id)
-    except Exception as e:
-        logger.error(
-            "Failed to store conversation turn",
-            exc_info=True,
-            extra={
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
-        )
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    # Use the assistant memory ID as the turn ID since that's the "response" part
+    logger.info("Successfully stored turn", extra={"turn_id": str(assistant_memory.id)})
+    return StoreTurnResponse(turn_id=assistant_memory.id)
 
 
 @router.post("/recall", response_model=SearchResponse, operation_id="recall")
+@with_error_handling(reraise=True)
 async def recall_memories(
     request: SearchRequest,
-    memory_service: MemoryService = Depends(get_memory_service),  # noqa: B008
+    memory_service: MemoryService = Depends(get_memory_service),
 ) -> SearchResponse:
     """Search and recall relevant memories."""
-    try:
-        logger.info("Searching memories", extra={
-            "query": request.query,
-            "k": request.k,
-            "threshold": request.threshold
-        })
+    logger.info("Searching memories", extra={
+        "query": request.query,
+        "k": request.k,
+        "threshold": request.threshold
+    })
 
-        messages = await memory_service.search_memories(
-            query=request.query,
-            limit=request.k,  # Map k to limit
-            similarity_threshold=request.threshold,  # Pass threshold to service
-            min_salience=request.min_salience,
-            topic_id=request.topic_ids[0] if request.topic_ids else None,
-        )
+    messages = await memory_service.search_memories(
+        query=request.query,
+        limit=request.k,  # Map k to limit
+        similarity_threshold=request.threshold,  # Pass threshold to service
+        min_salience=request.min_salience,
+        topic_id=request.topic_ids[0] if request.topic_ids else None,
+    )
 
-        # Convert to dict for response
-        message_dicts = []
-        for msg in messages:
-            msg_dict = {
-                "id": str(msg.id),
-                "content": msg.content,
-                "timestamp": msg.timestamp.isoformat(),
-                "memory_type": msg.memory_type.value,
-            }
-            # Add role based on memory type with personalized names
-            if msg.memory_type.value == "friend_utterance":
-                msg_dict["role"] = settings.friend_name
-            elif msg.memory_type.value == "claude_utterance":
-                msg_dict["role"] = settings.claude_name
-            elif msg.memory_type.value == "user_utterance":  # Legacy support
-                msg_dict["role"] = settings.friend_name
-            elif msg.memory_type.value == "assistant_utterance":  # Legacy support
-                msg_dict["role"] = settings.claude_name
-            else:
-                msg_dict["role"] = msg.memory_type.value
+    # Convert to dict for response
+    message_dicts = []
+    for msg in messages:
+        msg_dict = {
+            "id": str(msg.id),
+            "content": msg.content,
+            "timestamp": msg.timestamp.isoformat(),
+            "memory_type": msg.memory_type.value,
+        }
+        # Add role based on memory type with personalized names
+        if msg.memory_type.value == "friend_utterance":
+            msg_dict["role"] = settings.friend_name
+        elif msg.memory_type.value == "claude_utterance":
+            msg_dict["role"] = settings.claude_name
+        elif msg.memory_type.value == "user_utterance":  # Legacy support
+            msg_dict["role"] = settings.friend_name
+        elif msg.memory_type.value == "assistant_utterance":  # Legacy support
+            msg_dict["role"] = settings.claude_name
+        else:
+            msg_dict["role"] = msg.memory_type.value
 
-            message_dicts.append(msg_dict)
+        message_dicts.append(msg_dict)
 
-        logger.info("Search completed", extra={
-            "result_count": len(messages)
-        })
+    logger.info("Search completed", extra={
+        "result_count": len(messages)
+    })
 
-        return SearchResponse(
-            messages=message_dicts,
-            count=len(messages),
-        )
-    except Exception as e:
-        logger.error(
-            "Failed to search memories",
-            exc_info=True,
-            extra={
-                "error": str(e),
-                "query": request.query,
-                "traceback": traceback.format_exc()
-            }
-        )
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    return SearchResponse(
+        messages=message_dicts,
+        count=len(messages),
+    )

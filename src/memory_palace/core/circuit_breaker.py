@@ -2,10 +2,11 @@
 
 import asyncio
 import time
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
-from memory_palace.core.base import ErrorLevel, ServiceErrorDetails
+from memory_palace.core.base import ServiceErrorDetails
 from memory_palace.core.errors import RateLimitError, ServiceError, TimeoutError
 from memory_palace.core.logging import get_logger
 
@@ -277,13 +278,12 @@ class RetryWithCircuitBreaker:
         Raises:
             Last exception encountered after all retries
         """
-        delay = self.initial_delay
         last_exception: Exception | None = None
         
-        for attempt in range(1, self.max_retries + 1):
+        for _attempt in range(1, self.max_retries + 1):
             # Check circuit breaker state first
-            if self.circuit_breaker.state == CircuitState.OPEN:
-                if not self.circuit_breaker._should_attempt_reset():
+            if (self.circuit_breaker.state == CircuitState.OPEN and
+                not self.circuit_breaker._should_attempt_reset()):
                     # Circuit is open and not ready to reset
                     raise ServiceError(
                         message=f"Circuit breaker '{self.circuit_breaker.name}' is open",

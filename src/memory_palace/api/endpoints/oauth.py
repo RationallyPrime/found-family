@@ -229,7 +229,7 @@ async def authorize(
     redirect_uri: str,
     scope: str = "read write",
     state: str | None = None,
-    code_challenge: str | None = None,  # noqa: ARG001
+    code_challenge: str | None = None,
     code_challenge_method: str | None = None,  # noqa: ARG001
 ):
     """OAuth authorization endpoint - supports dynamic clients."""
@@ -400,7 +400,7 @@ async def introspect_token(token: str = Form(...)):
 
 
 @router.post("/oauth/revoke", operation_id="revoke")
-async def revoke_token(token: str = Form(...)):
+async def revoke_token(token: str = Form(...)):  # noqa: ARG001
     """Token revocation endpoint (RFC 7009)."""
     # For simplicity, just return success (tokens are stateless JWTs)
     return {"revoked": True}

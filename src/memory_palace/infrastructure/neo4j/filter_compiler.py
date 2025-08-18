@@ -6,7 +6,7 @@ preventing SQL injection and supporting advanced operators.
 
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any
 
 _OPS = {
     "lt": "<",
@@ -30,7 +30,7 @@ def _param_name(base: str, idx: int) -> str:
 def compile_filters(
     filters: dict[str, Any] | None,
     alias: str = "m"
-) -> Tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """Compile filter dictionary into safe WHERE clause and parameters.
     
     Args:

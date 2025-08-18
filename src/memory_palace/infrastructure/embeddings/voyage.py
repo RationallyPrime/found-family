@@ -1,6 +1,5 @@
 """Voyage AI embedding service."""
 
-import asyncio
 import os
 from typing import Any, cast
 
