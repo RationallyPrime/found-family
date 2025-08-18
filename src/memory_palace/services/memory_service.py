@@ -134,14 +134,17 @@ class MemoryService:
         )
 
         # Detect relationships with existing memories if enabled
+        friend_relationships = []
+        claude_relationships = []
+        
         if detect_relationships:
             logger.debug("Detecting semantic relationships")
             friend_relationships = await self._detect_and_create_relationships(
                 friend_memory, similarity_threshold
-            )
+            ) or []
             claude_relationships = await self._detect_and_create_relationships(
                 claude_memory, similarity_threshold
-            )
+            ) or []
 
             # Update salience based on relationship count and strength
             await self._update_salience_from_relationships(
@@ -330,6 +333,7 @@ class MemoryService:
                 metadata={"detection_method": "vector_index"}
             )
 
+            # Note: Neo4j can't store nested objects, so metadata is flattened in the repository
             await self.relationship_repo.remember(relationship)
             relationships.append(relationship)
 

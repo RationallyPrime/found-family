@@ -8,12 +8,14 @@ import voyageai
 from pydantic import ConfigDict, Field
 
 from memory_palace.core.base import ErrorLevel, ServiceErrorDetails
+from memory_palace.core.circuit_breaker import CircuitBreaker, RetryWithCircuitBreaker
 from memory_palace.core.config import settings
 from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.errors import (
     AuthenticationError,
     ProcessingError,
     RateLimitError,
+    ServiceError,
     TimeoutError,
 )
 from memory_palace.core.logging import get_logger
@@ -63,10 +65,13 @@ class VoyageEmbeddingService:
     # Model configuration
     model: str = Field(default="")  # Will be set in __init__ from settings
     default_embedding_type: EmbeddingType = Field(default=EmbeddingType.TEXT)
-    # voyageai client doesn't expose a public type, but we can type it as voyageai.Client
-    # which is what we're actually using. This avoids the Any type.
-    client: voyageai.AsyncClient
+    # voyageai client doesn't expose a public type, so we use Any here
+    client: Any  # voyageai.AsyncClient
     cache: EmbeddingCache | None = None
+    
+    # Circuit breaker for API calls
+    _circuit_breaker: CircuitBreaker
+    _retry_handler: RetryWithCircuitBreaker
 
     @with_error_handling(error_level=ErrorLevel.ERROR)
     def __init__(
@@ -88,8 +93,10 @@ class VoyageEmbeddingService:
 
         # Handle both SecretStr and plain string for API key
         api_key = settings.voyage_api_key
-        if hasattr(api_key, 'get_secret_value') and callable(api_key.get_secret_value):
-            api_key = api_key.get_secret_value()  # type: ignore
+        if hasattr(api_key, 'get_secret_value'):
+            api_key = str(api_key.get_secret_value())  # type: ignore
+        else:
+            api_key = str(api_key) if api_key else ""
 
         if not api_key:
             details = ServiceErrorDetails(
@@ -114,8 +121,27 @@ class VoyageEmbeddingService:
         os.environ["VOYAGE_API_KEY"] = api_key
 
         # Initialize the client which will use the environment variable
-        self.client = voyageai.AsyncClient()
+        self.client = voyageai.AsyncClient()  # type: ignore
         self.cache = cache
+        
+        # Initialize circuit breaker for API calls
+        self._circuit_breaker = CircuitBreaker(
+            name="voyage_api",
+            failure_threshold=3,
+            recovery_timeout=30.0,
+            expected_exception_types=(RateLimitError, TimeoutError, ServiceError),
+            success_threshold=2,
+        )
+        
+        # Initialize retry handler with circuit breaker
+        self._retry_handler = RetryWithCircuitBreaker(
+            circuit_breaker=self._circuit_breaker,
+            max_retries=3,
+            initial_delay=1.0,
+            backoff_factor=2.0,
+            max_delay=30.0,
+            retryable_exceptions=(RateLimitError, TimeoutError),
+        )
 
     async def _generate_embedding(self, text: str) -> list[float]:
         """Generate a fresh embedding via the Voyage API."""
@@ -156,10 +182,37 @@ class VoyageEmbeddingService:
 
         return embedding
 
-    @with_error_handling(error_level=ErrorLevel.ERROR)
+    async def _call_voyage_api_internal(self, texts: list[str]) -> list[list[float]]:
+        """
+        Internal method to call Voyage API.
+        
+        This is wrapped by the circuit breaker.
+        """
+        response = await self.client.embed(texts=texts, model=self.model)
+        
+        embeddings = getattr(response, "embeddings", [])
+        if not embeddings or len(embeddings) != len(texts):
+            # This is a processing error, not retryable
+            raise ProcessingError(
+                message="Voyage API returned incomplete embeddings",
+                details=ServiceErrorDetails(
+                    source="voyage_embedding",
+                    operation="embed_batch",
+                    service_name="voyage",
+                    endpoint="/embeddings",
+                    status_code=200,  # API returned 200 but bad data
+                    request_id=None,
+                    latency_ms=None,
+                ),
+            )
+        
+        # Success! Return the embeddings
+        return [cast("list[float]", emb) for emb in embeddings]
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
-        Generate embedding vectors for a batch of texts.
+        Generate embedding vectors for a batch of texts with circuit breaker and retry logic.
 
         Args:
             texts: List of texts to embed
@@ -168,7 +221,8 @@ class VoyageEmbeddingService:
             List of embedding vectors corresponding to the input texts
 
         Raises:
-            EmbeddingError: If there was an error generating the embeddings
+            ProcessingError: If there was an error generating the embeddings
+            ServiceError: If the circuit is open or service fails
         """
         if not texts:
             return []
@@ -178,53 +232,17 @@ class VoyageEmbeddingService:
         if not valid_texts:
             raise ProcessingError(
                 message="Batch contains only empty texts",
-                details={"original_batch_size": len(texts)},
+                details={
+                    "source": "voyage_embedding",
+                    "operation": "embed_batch",
+                    "original_batch_size": len(texts),
+                },
             )
 
-        # Handle retries and rate limits
-        max_retries = 3
-        backoff_factor = 1.5
-        delay = 1.0
-
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = await self.client.embed(texts=valid_texts, model=self.model)
-
-                embeddings = getattr(response, "embeddings", [])
-                if not embeddings or len(embeddings) != len(valid_texts):
-                    raise ProcessingError(
-                        message="Failed to generate embeddings for batch",
-                        details={"batch_size": len(valid_texts)},
-                    )
-
-                # Build the result with proper type casting
-                return [cast("list[float]", emb) for emb in embeddings]
-
-            except Exception as e:
-                error_msg = str(e).lower()
-                is_retryable = any(
-                    msg in error_msg for msg in ["rate limit", "timeout", "connection", "try again"]
-                )
-
-                if is_retryable and attempt < max_retries:
-                    logger.warning(
-                        "Retryable error on attempt %d/%d. Backing off for %.1f seconds: %s",
-                        attempt,
-                        max_retries,
-                        delay,
-                        str(e),
-                    )
-                    await asyncio.sleep(delay)
-                    delay *= backoff_factor
-                    continue
-
-                # If we're here, either it's not retryable or we're out of retries
-                raise self._handle_error(e, 0, valid_texts, self.model) from e
-
-        # Should never reach here due to the raise above
-        raise ProcessingError(
-            message="Failed to generate embeddings after retries",
-            details={"batch_size": len(valid_texts)},
+        # Use circuit breaker with retries
+        return await self._retry_handler.call_async(
+            self._call_voyage_api_internal,
+            valid_texts,
         )
 
     def _handle_error(

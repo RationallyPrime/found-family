@@ -190,6 +190,145 @@ sudo systemctl start cloudflared-memory-palace
 ./run-prod.sh
 ```
 
+## Error Handling Architecture - CRITICAL
+
+**DO NOT USE TRY-EXCEPT BLOCKS!** The codebase has a sophisticated error handling system that must be used instead.
+
+### Core Error System (`src/memory_palace/core/`)
+
+The application uses a structured error handling system with:
+
+1. **Custom Error Classes** (`core/errors.py`):
+   - `ApplicationError`: Base class with error code, level, and structured details
+   - `ServiceError`, `AuthenticationError`, `ProcessingError`, `RateLimitError`, `TimeoutError`
+   - All errors include structured `ErrorDetails` models (Pydantic) for rich logging
+
+2. **Error Codes** (`core/base.py`):
+   - Categorized error codes (1xxx: General, 2xxx: API, 3xxx: Database, 4xxx: AI/ML, 5xxx: Infrastructure)
+   - Each error has a specific code for tracking and debugging
+
+3. **Error Details Models** (`core/base.py`):
+   - `ServiceErrorDetails`: Service name, endpoint, status code, latency
+   - `ValidationErrorDetails`: Field, actual value, expected type, constraint
+   - `ResourceErrorDetails`: Resource ID, type, action
+   - `DatabaseErrorDetails`: Query type, table, transaction ID
+   - `AIServiceErrorDetails`: Model name, tokens, temperature
+
+### How to Handle Errors
+
+**NEVER write raw try-except blocks!** Instead:
+
+1. **Use the decorators** (`core/decorators.py`):
+```python
+from memory_palace.core.decorators import with_error_handling
+from memory_palace.core.errors import ServiceError
+from memory_palace.core.base import ServiceErrorDetails
+
+@with_error_handling(reraise=True)
+async def call_external_service():
+    # If this fails, raise a proper ApplicationError
+    if response.status_code != 200:
+        raise ServiceError(
+            message="External service failed",
+            details=ServiceErrorDetails(
+                source="my_module",
+                operation="api_call",
+                service_name="voyage",
+                endpoint="/embeddings",
+                status_code=response.status_code
+            )
+        )
+```
+
+2. **Raise ApplicationError subclasses** with structured details:
+```python
+from memory_palace.core.errors import ProcessingError
+
+# Instead of generic exceptions:
+# raise Exception("Processing failed")  # WRONG!
+
+# Use structured errors:
+raise ProcessingError(
+    message="Failed to process memory",
+    details={
+        "source": "memory_service",
+        "operation": "store_memory",
+        "memory_id": str(memory_id),
+        "reason": "Embedding generation failed"
+    }
+)
+```
+
+3. **The system automatically**:
+   - Captures full error context with trace IDs
+   - Logs with structured data to Logfire
+   - Preserves error details through the stack
+   - Formats error responses for API endpoints
+
+### Logging System (`core/logging/`)
+
+Uses Logfire + structlog for structured logging:
+
+1. **Get a logger**:
+```python
+from memory_palace.core.logging import get_logger
+logger = get_logger(__name__)
+```
+
+2. **Log with structure** (automatic with decorators):
+```python
+logger.info("Operation completed", user_id=user_id, duration_ms=100)
+```
+
+3. **Context management**:
+```python
+from memory_palace.core.logging import update_log_context
+update_log_context("request_id", request_id)
+# All subsequent logs in this context include request_id
+```
+
+### Key Principles
+
+1. **No naked try-except**: Always use `@with_error_handling` decorator
+2. **Structured errors**: Always raise `ApplicationError` subclasses with details
+3. **Rich context**: Include all relevant data in error details
+4. **Let it propagate**: The system handles logging and response formatting
+5. **One source of truth**: Error handling logic is centralized in `core/`
+
+### Example: Correct Error Handling
+
+```python
+from memory_palace.core.decorators import with_error_handling
+from memory_palace.core.errors import ServiceError
+from memory_palace.core.base import ServiceErrorDetails
+from memory_palace.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+class VoyageEmbeddingService:
+    @with_error_handling(reraise=True)  # Decorator handles all error logging
+    async def generate_embedding(self, text: str) -> list[float]:
+        logger.info("Generating embedding", text_length=len(text))
+        
+        response = await self.client.embeddings.create(...)
+        
+        if not response.data:
+            # Raise structured error, no try-except needed!
+            raise ServiceError(
+                message="Voyage API returned empty response",
+                details=ServiceErrorDetails(
+                    source="voyage_embedding",
+                    operation="generate_embedding",
+                    service_name="voyage",
+                    endpoint="/embeddings",
+                    status_code=200,
+                    latency_ms=response.headers.get("x-response-time")
+                )
+            )
+        
+        return response.data[0].embedding
+```
+
 ## Future Features (In Progress)
 
 - Topic clustering for automatic organization
