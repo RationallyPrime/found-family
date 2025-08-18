@@ -141,15 +141,18 @@ class VoyageEmbeddingService:
     async def embed_text(self, text: str) -> list[float]:
         """Generate an embedding vector for the provided text with caching."""
         if self.cache:
-            cached = await self.cache.get_cached(text)
+            # Pass model name for cache key to prevent cross-model contamination
+            cached = await self.cache.get_cached(text, self.model)
             if cached:
-                logger.debug(f"Embedding cache hit for text: {text[:50]}...")
+                logger.debug(f"Embedding cache hit for text: {text[:50]}... (model: {self.model})")
                 return cached
 
         embedding = await self._generate_embedding(text)
 
         if self.cache:
-            await self.cache.store(text, embedding)
+            # Store with model and dimension metadata
+            dimensions = self.get_model_dimensions()
+            await self.cache.store(text, self.model, embedding, dimensions)
 
         return embedding
 

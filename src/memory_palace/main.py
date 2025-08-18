@@ -72,13 +72,19 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         if neo4j_driver is None:
             raise RuntimeError("Failed to initialize Neo4j driver")
 
-        await ensure_vector_index(neo4j_driver)
-        logger.info("✅ Vector index initialized")
-
-        # Initialize embedding service with cache
+        # Initialize embedding service with cache first
         logger.info("🧮 Initializing Embedding Service...")
-        embedding_cache = EmbeddingCache(neo4j_driver.session())
+        # Pass the driver, not a session, to avoid holding open a session
+        embedding_cache = EmbeddingCache(neo4j_driver)
         embedding_service = VoyageEmbeddingService(cache=embedding_cache)
+        
+        # Get the actual embedding dimensions from the service
+        embedding_dims = embedding_service.get_model_dimensions()
+        logger.info(f"📏 Using embedding model '{embedding_service.model}' with {embedding_dims} dimensions")
+        
+        # Ensure vector index exists with correct dimensions
+        await ensure_vector_index(neo4j_driver, dimensions=embedding_dims)
+        logger.info("✅ Vector index initialized with correct dimensions")
 
         # Initialize clustering service and load model
         logger.info("🔍 Initializing Clustering Service...")
@@ -90,6 +96,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         dependencies.neo4j_driver = neo4j_driver
         dependencies.embedding_service = embedding_service
         dependencies.neo4j_query = Neo4jQuery(neo4j_driver)
+        dependencies.clustering_service = clustering_service
 
         # Note: We'll create sessions per-request, not hold one open
         logger.info("💾 Services initialized and ready...")

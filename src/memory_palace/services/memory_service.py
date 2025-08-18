@@ -55,14 +55,14 @@ class MemoryService:
         # Use the specialized MemoryRepository for the discriminated union
         self.memory_repo = MemoryRepository(session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
-    
+
     async def initialize(self) -> None:
         """Initialize the service, loading models etc."""
         await self.clusterer.load_model(self.session)
-    
+
     async def run_query(self, query: str, **params):
         """Helper method to run queries with proper type casting.
-        
+
         This wraps session.run() to handle the LiteralString requirement
         in a trusted context where we control the query construction.
         """
@@ -97,7 +97,7 @@ class MemoryService:
             # Use provided salience or default to 0.3 (regular conversation)
             # We use 0.3 as baseline since if we're storing it, it's already worth remembering
             memory_salience = salience if salience is not None else 0.3
-            
+
             friend_memory = FriendUtterance(
                 id=uuid4(),
                 content=user_content,
@@ -158,6 +158,129 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Failed to store conversation turn: {e}", exc_info=True)
             raise
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def remember_turn_atomic(
+        self,
+        user_content: str,
+        assistant_content: str,
+        conversation_id: UUID | None = None,
+        salience: float | None = None,
+        detect_relationships: bool = False  # Disabled by default for atomic operation
+    ) -> Turn:
+        """Store a complete conversation turn in a single atomic transaction.
+
+        This method is optimized for performance by combining all operations
+        into a single Cypher query, reducing round-trips to the database.
+        """
+        logger.info(f"Storing conversation turn atomically for conversation {conversation_id}")
+
+        # Generate embeddings for both messages in parallel
+        embeddings = await self.embeddings.embed_batch(
+            [user_content, assistant_content]
+        )
+
+        # Auto-classify into topics if clusterer is available
+        topic_ids = [None, None]
+        if self.clusterer:
+            logger.debug("Performing topic classification")
+            topic_ids = await self.clusterer.predict(embeddings)
+            topic_ids = [
+                tid if tid != -1 else None for tid in topic_ids
+            ]
+            logger.debug(f"Assigned topics: friend={topic_ids[0]}, claude={topic_ids[1]}")
+
+        # Generate IDs
+        friend_id = str(uuid4())
+        claude_id = str(uuid4())
+        turn_id = str(uuid4())
+
+        # Use provided salience or default
+        memory_salience = salience if salience is not None else 0.3
+
+        # Single atomic query to create all nodes and relationships
+        query = """
+            // Create friend utterance
+            CREATE (f:Memory:FriendUtterance {
+                id: $friend_id,
+                content: $user_content,
+                embedding: $user_embedding,
+                salience: $salience,
+                topic_id: $topic_user,
+                conversation_id: $conversation_id,
+                timestamp: datetime(),
+                type: 'friend_utterance'
+            })
+
+            // Create claude utterance
+            CREATE (c:Memory:ClaudeUtterance {
+                id: $claude_id,
+                content: $assistant_content,
+                embedding: $assistant_embedding,
+                salience: $salience,
+                topic_id: $topic_assistant,
+                conversation_id: $conversation_id,
+                timestamp: datetime(),
+                type: 'claude_utterance'
+            })
+
+            // Create turn node
+            CREATE (t:ConversationTurn {
+                id: $turn_id,
+                friend_utterance_id: $friend_id,
+                claude_utterance_id: $claude_id,
+                conversation_id: $conversation_id,
+                timestamp: datetime()
+            })
+
+            // Create relationships
+            CREATE (f)-[:FOLLOWED_BY {strength: 1.0, sequence: 'conversation_turn'}]->(c)
+            CREATE (t)-[:HAS_FRIEND]->(f)
+            CREATE (t)-[:HAS_CLAUDE]->(c)
+
+            RETURN f, c, t
+            """
+
+        result = await self.session.run(
+            query,
+            friend_id=friend_id,
+            claude_id=claude_id,
+            turn_id=turn_id,
+            user_content=user_content,
+            assistant_content=assistant_content,
+            user_embedding=embeddings[0],
+            assistant_embedding=embeddings[1],
+            salience=memory_salience,
+            topic_user=topic_ids[0],
+            topic_assistant=topic_ids[1],
+            conversation_id=str(conversation_id) if conversation_id else None
+        )
+
+        record = await result.single()
+        if not record:
+            raise RuntimeError("Failed to create conversation turn")
+
+        # Convert records to memory objects
+        friend_memory = FriendUtterance(
+            id=UUID(friend_id),
+            content=user_content,
+            embedding=embeddings[0],
+            conversation_id=conversation_id,
+            salience=memory_salience,
+            topic_id=topic_ids[0]
+        )
+
+        claude_memory = ClaudeUtterance(
+            id=UUID(claude_id),
+            content=assistant_content,
+            embedding=embeddings[1],
+            conversation_id=conversation_id,
+            salience=memory_salience,
+            topic_id=topic_ids[1]
+        )
+
+        logger.info(f"Successfully stored turn atomically: friend={friend_id}, claude={claude_id}")
+        return (friend_memory, claude_memory)
 
     async def _detect_and_create_relationships(
         self,
@@ -456,21 +579,21 @@ class MemoryService:
         limit: int = 50,
     ) -> list[Memory]:
         """Recall memories using powerful specification-based filtering.
-        
+
         This method allows composing specifications for complex queries:
         - Combine multiple criteria with AND/OR logic
         - Filter by salience, topics, conversations, recency, emotions, etc.
         - Optionally add semantic similarity search
-        
+
         Args:
             specifications: List of specification objects to apply
             query: Optional text query for similarity search
             similarity_threshold: Minimum similarity score (if query provided)
             limit: Maximum number of results
-            
+
         Returns:
             List of memories matching the specifications
-            
+
         Example:
             >>> # Find recent, salient memories from a specific conversation
             >>> specs = [
@@ -518,7 +641,7 @@ class MemoryService:
             builder.limit(limit)
             query_str, params = builder.build()
             result = await self.run_query(query_str, **params)
-        
+
         memories = []
         async for record in result:
             memory_data = dict(record["m"])
@@ -527,7 +650,7 @@ class MemoryService:
                 memories.append(memory)
             except Exception as e:
                 logger.warning(f"Failed to deserialize memory: {e}")
-        
+
         logger.info(f"Specification-based recall returned {len(memories)} memories")
         return memories
 

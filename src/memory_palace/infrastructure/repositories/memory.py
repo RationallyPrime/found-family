@@ -6,6 +6,7 @@ from neo4j import AsyncSession
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models.base import GraphModel
 from memory_palace.domain.models.memories import Memory
+from memory_palace.infrastructure.neo4j.filter_compiler import compile_filters
 
 logger = get_logger(__name__)
 
@@ -68,11 +69,12 @@ class GenericMemoryRepository(Generic[T]):
 
             if similarity_search:
                 embedding, threshold = similarity_search
+                filter_clause, filter_params = self._build_filter_clause(filters, alias='node')
                 query = f"""
                 CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
                 YIELD node, score
                 WHERE node:{labels_str} AND score > $threshold
-                {self._build_filter_clause(filters, alias='node') if filters else ''}
+                {filter_clause}
                 RETURN node as m, score as similarity
                 ORDER BY similarity DESC
                 SKIP $offset LIMIT $limit
@@ -82,18 +84,19 @@ class GenericMemoryRepository(Generic[T]):
                     "threshold": threshold,
                     "offset": offset,
                     "limit": limit,
-                    "k": limit,
-                    **(filters or {})
+                    "k": max(limit * 3, 50),  # Widen k for better recall
+                    **filter_params
                 }
             else:
+                where_clause, where_params = self._build_where_clause(filters)
                 query = f"""
                 MATCH (m:{labels_str})
-                {self._build_where_clause(filters)}
+                {where_clause}
                 RETURN m
                 ORDER BY m.timestamp DESC
                 SKIP $offset LIMIT $limit
                 """
-                params = {"offset": offset, "limit": limit, **(filters or {})}
+                params = {"offset": offset, "limit": limit, **where_params}
 
             result = await self.session.run(query, **params)
 
@@ -225,39 +228,27 @@ class GenericMemoryRepository(Generic[T]):
             logger.error(f"Failed to delete memory {memory_id}: {e}")
             raise
 
-    def _build_where_clause(self, filters: dict[str, Any] | None) -> str:
-        """Build WHERE clause from filters."""
-        if not filters:
-            return ""
+    def _build_where_clause(self, filters: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
+        """Build WHERE clause from filters using safe parameterization.
+        
+        Returns:
+            Tuple of (WHERE clause, parameters dict)
+        """
+        return compile_filters(filters, alias="m")
 
-        conditions = []
-        for key, value in filters.items():
-            if isinstance(value, str):
-                conditions.append(f"m.{key} = '{value}'")
-            elif isinstance(value, int | float):
-                conditions.append(f"m.{key} = {value}")
-            elif isinstance(value, list):
-                str_values = [f"'{v}'" if isinstance(v, str) else str(v) for v in value]
-                conditions.append(f"m.{key} IN [{', '.join(str_values)}]")
-
-        return f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-    def _build_filter_clause(self, filters: dict[str, Any] | None, alias: str = "m") -> str:
-        """Build filter clause for similarity search (assumes WHERE already used)."""
-        if not filters:
-            return ""
-
-        conditions = []
-        for key, value in filters.items():
-            if isinstance(value, str):
-                conditions.append(f"{alias}.{key} = '{value}'")
-            elif isinstance(value, int | float):
-                conditions.append(f"{alias}.{key} = {value}")
-            elif isinstance(value, list):
-                str_values = [f"'{v}'" if isinstance(v, str) else str(v) for v in value]
-                conditions.append(f"{alias}.{key} IN [{', '.join(str_values)}]")
-
-        return f"AND {' AND '.join(conditions)}" if conditions else ""
+    def _build_filter_clause(self, filters: dict[str, Any] | None, alias: str = "m") -> tuple[str, dict[str, Any]]:
+        """Build filter clause for similarity search (assumes WHERE already used).
+        
+        Returns:
+            Tuple of (filter clause, parameters dict)
+        """
+        where_clause, params = compile_filters(filters, alias=alias)
+        # Remove "WHERE " prefix since similarity search already has WHERE
+        if where_clause.startswith("WHERE "):
+            filter_clause = " AND " + where_clause[6:]
+        else:
+            filter_clause = ""
+        return filter_clause, params
 
     def _record_to_memory(self, record: dict, memory_type: type[T]) -> T:
         """Convert Neo4j record to memory object."""
@@ -283,11 +274,11 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         try:
             if similarity_search:
                 embedding, threshold = similarity_search
+                filter_clause, filter_params = self._build_filter_clause(filters, alias='node')
                 query = f"""
                 CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
                 YIELD node, score
-                WHERE score > $threshold
-                {self._build_filter_clause(filters, alias='node')}
+                WHERE score > $threshold{filter_clause}
                 RETURN node as m, score as similarity
                 ORDER BY similarity DESC
                 SKIP $offset LIMIT $limit
@@ -299,17 +290,18 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                     "offset": offset,
                     "limit": limit,
                     "k": limit,
-                    **(filters or {})
+                    **filter_params
                 }
             else:
+                where_clause, filter_params = self._build_where_clause(filters)
                 query = f"""
                 MATCH (m:Memory)
-                {self._build_where_clause(filters)}
+                {where_clause}
                 RETURN m
                 ORDER BY m.timestamp DESC
                 SKIP $offset LIMIT $limit
                 """
-                params = {"offset": offset, "limit": limit, **(filters or {})}
+                params = {"offset": offset, "limit": limit, **filter_params}
 
             result = await self.session.run(query, **params)
 

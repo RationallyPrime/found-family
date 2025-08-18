@@ -87,20 +87,64 @@ async def create_neo4j_driver(
     logger.info("Neo4j driver closed")
 
 
-async def ensure_vector_index(driver: AsyncDriver) -> None:
-    """Ensure the vector index for memory embeddings exists."""
-
+async def ensure_vector_index(driver: AsyncDriver, dimensions: int = 1024) -> None:
+    """Ensure the vector index for memory embeddings exists with correct dimensions.
+    
+    Args:
+        driver: Neo4j async driver
+        dimensions: Expected embedding dimensions (will recreate index if mismatch)
+    """
     async with driver.session() as session:
-        await session.run(
+        # Check if index exists and get its dimensions
+        result = await session.run(
             """
-            CREATE VECTOR INDEX memory_embeddings IF NOT EXISTS
-            FOR (m:Memory) ON m.embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
+            SHOW INDEXES 
+            YIELD name, type, options 
+            WHERE name = 'memory_embeddings' AND type = 'VECTOR'
+            RETURN options
             """
         )
+        
+        record = await result.single()
+        current_dims = None
+        
+        if record and record.get("options"):
+            # Extract dimensions from index config
+            options = record["options"]
+            index_config = options.get("indexConfig") or options.get("config") or {}
+            
+            # Neo4j uses backticks for property names with dots
+            current_dims = index_config.get("`vector.dimensions`") or \
+                          index_config.get("vector.dimensions")
+            
+            if current_dims:
+                current_dims = int(current_dims)
+                logger.info(f"Existing vector index found with {current_dims} dimensions")
+        
+        # If dimensions don't match, recreate the index
+        if current_dims is not None and current_dims != dimensions:
+            logger.warning(
+                f"Vector index dimension mismatch: existing={current_dims}, expected={dimensions}. "
+                f"Recreating index..."
+            )
+            
+            # Drop the existing index
+            await session.run("DROP INDEX memory_embeddings IF EXISTS")
+            logger.info("Dropped existing vector index")
+        
+        # Create the index with correct dimensions
+        if current_dims is None or current_dims != dimensions:
+            await session.run(
+                f"""
+                CREATE VECTOR INDEX memory_embeddings IF NOT EXISTS
+                FOR (m:Memory) ON m.embedding
+                OPTIONS {{indexConfig: {{
+                  `vector.dimensions`: {dimensions},
+                  `vector.similarity_function`: 'cosine'
+                }}}}
+                """
+            )
+            logger.info(f"Created vector index with {dimensions} dimensions")
 
 
 class Neo4jQuery(Generic[T]):

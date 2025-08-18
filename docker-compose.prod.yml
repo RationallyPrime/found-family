@@ -50,6 +50,8 @@ services:
       start_period: 40s
     volumes:
       - ./logs:/app/logs
+      - ./src:/app/src:ro  # Mount source code read-only for hot reload
+    command: ["uvicorn", "memory_palace.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 volumes:
   neo4j_data:
