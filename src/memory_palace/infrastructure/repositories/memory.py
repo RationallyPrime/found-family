@@ -3,6 +3,8 @@ from uuid import UUID
 
 from neo4j import AsyncSession
 
+from memory_palace.core.base import ErrorLevel
+from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.models.base import GraphModel
 from memory_palace.domain.models.memories import Memory
@@ -19,40 +21,37 @@ class GenericMemoryRepository(Generic[T]):
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def remember(self, memory: T) -> T:
         """Store any type of memory with full type safety."""
-        try:
-            labels = memory.labels()
-            labels_str = ":".join(labels)
-            properties = memory.to_neo4j_properties()
+        labels = memory.labels()
+        labels_str = ":".join(labels)
+        properties = memory.to_neo4j_properties()
 
-            logger.debug(f"Storing {memory.__class__.__name__} with labels: {labels}")
+        logger.debug(f"Storing {memory.__class__.__name__} with labels: {labels}")
 
-            # Use MERGE to handle both create and update scenarios
-            query = f"""
-            MERGE (m:{labels_str} {{id: $id}})
-            SET m += $properties
-            RETURN m
-            """
+        # Use MERGE to handle both create and update scenarios
+        query = f"""
+        MERGE (m:{labels_str} {{id: $id}})
+        SET m += $properties
+        RETURN m
+        """
 
-            result = await self.session.run(
-                query,
-                id=str(memory.id),
-                properties=properties
-            )
+        result = await self.session.run(
+            query,
+            id=str(memory.id),
+            properties=properties
+        )
 
-            # Verify the memory was stored
-            record = await result.single()
-            if not record:
-                raise RuntimeError(f"Failed to store memory {memory.id}")
+        # Verify the memory was stored
+        record = await result.single()
+        if not record:
+            raise RuntimeError(f"Failed to store memory {memory.id}")
 
-            logger.debug(f"Successfully stored memory {memory.id}")
-            return memory
+        logger.debug(f"Successfully stored memory {memory.id}")
+        return memory
 
-        except Exception as e:
-            logger.error(f"Failed to store memory {memory.id}: {e}")
-            raise
-
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def recall(
         self,
         memory_type: type[T],
@@ -62,82 +61,74 @@ class GenericMemoryRepository(Generic[T]):
         offset: int = 0
     ) -> list[T]:
         """Recall memories with type safety and optional similarity search."""
-        try:
-            # Get labels from the memory type class
-            labels = memory_type.labels()
-            labels_str = ":".join(labels)
+        # Get labels from the memory type class
+        labels = memory_type.labels()
+        labels_str = ":".join(labels)
 
-            if similarity_search:
-                embedding, threshold = similarity_search
-                filter_clause, filter_params = self._build_filter_clause(filters, alias='node')
-                query = f"""
-                CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
-                YIELD node, score
-                WHERE node:{labels_str} AND score > $threshold
-                {filter_clause}
-                RETURN node as m, score as similarity
-                ORDER BY similarity DESC
-                SKIP $offset LIMIT $limit
-                """
-                params = {
-                    "embedding": embedding,
-                    "threshold": threshold,
-                    "offset": offset,
-                    "limit": limit,
-                    "k": max(limit * 3, 50),  # Widen k for better recall
-                    **filter_params
-                }
-            else:
-                where_clause, where_params = self._build_where_clause(filters)
-                query = f"""
-                MATCH (m:{labels_str})
-                {where_clause}
-                RETURN m
-                ORDER BY m.timestamp DESC
-                SKIP $offset LIMIT $limit
-                """
-                params = {"offset": offset, "limit": limit, **where_params}
+        if similarity_search:
+            embedding, threshold = similarity_search
+            filter_clause, filter_params = self._build_filter_clause(filters, alias='node')
+            query = f"""
+            CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
+            YIELD node, score
+            WHERE node:{labels_str} AND score > $threshold
+            {filter_clause}
+            RETURN node as m, score as similarity
+            ORDER BY similarity DESC
+            SKIP $offset LIMIT $limit
+            """
+            params = {
+                "embedding": embedding,
+                "threshold": threshold,
+                "offset": offset,
+                "limit": limit,
+                "k": max(limit * 3, 50),  # Widen k for better recall
+                **filter_params
+            }
+        else:
+            where_clause, where_params = self._build_where_clause(filters)
+            query = f"""
+            MATCH (m:{labels_str})
+            {where_clause}
+            RETURN m
+            ORDER BY m.timestamp DESC
+            SKIP $offset LIMIT $limit
+            """
+            params = {"offset": offset, "limit": limit, **where_params}
 
-            result = await self.session.run(query, **params)
+        result = await self.session.run(query, **params)
 
-            memories = []
-            async for record in result:
-                try:
-                    memory = self._record_to_memory(record["m"], memory_type)
-                    memories.append(memory)
-                except Exception as e:
-                    logger.warning(f"Failed to deserialize memory record: {e}")
-                    continue
+        memories = []
+        async for record in result:
+            try:
+                memory = self._record_to_memory(record["m"], memory_type)
+                memories.append(memory)
+            except Exception as e:
+                logger.warning(f"Failed to deserialize memory record: {e}")
+                continue
 
-            logger.debug(f"Recalled {len(memories)} memories of type {memory_type.__name__}")
-            return memories
+        logger.debug(f"Recalled {len(memories)} memories of type {memory_type.__name__}")
+        return memories
 
-        except Exception as e:
-            logger.error(f"Failed to recall memories of type {memory_type.__name__}: {e}")
-            return []
-
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def get_by_id(self, memory_id: UUID, memory_type: type[T]) -> T | None:
         """Get a specific memory by ID with type safety."""
-        try:
-            labels = memory_type.labels()
-            labels_str = ":".join(labels)
+        labels = memory_type.labels()
+        labels_str = ":".join(labels)
 
-            query = f"""
-            MATCH (m:{labels_str} {{id: $id}})
-            RETURN m
-            """
+        query = f"""
+        MATCH (m:{labels_str} {{id: $id}})
+        RETURN m
+        """
 
-            result = await self.session.run(query, id=str(memory_id))
-            record = await result.single()
+        result = await self.session.run(query, id=str(memory_id))
+        record = await result.single()
 
-            if record:
-                return self._record_to_memory(record["m"], memory_type)
-            return None
+        if record:
+            return self._record_to_memory(record["m"], memory_type)
+        return None
 
-        except Exception as e:
-            logger.error(f"Failed to get memory {memory_id}: {e}")
-            return None
-
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def connect(
         self,
         source_id: UUID,
@@ -146,8 +137,7 @@ class GenericMemoryRepository(Generic[T]):
         properties: dict[str, Any] | None = None
     ):
         """Create a relationship between two memories."""
-        try:
-            query = """
+        query = """
             MATCH (source:Memory {id: $source_id})
             MATCH (target:Memory {id: $target_id})
             MERGE (source)-[r:`{rel_type}`]->(target)
@@ -155,19 +145,16 @@ class GenericMemoryRepository(Generic[T]):
             RETURN r
             """.replace("{rel_type}", relationship_type)
 
-            await self.session.run(
+        await self.session.run(
                 query,
                 source_id=str(source_id),
                 target_id=str(target_id),
                 properties=properties or {}
             )
 
-            logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
+        logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
 
-        except Exception as e:
-            logger.error(f"Failed to create relationship {source_id} -> {target_id}: {e}")
-            raise
-
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def disconnect(
         self,
         source_id: UUID,
@@ -175,14 +162,13 @@ class GenericMemoryRepository(Generic[T]):
         relationship_type: str | None = None
     ):
         """Remove relationship(s) between two memories."""
-        try:
-            if relationship_type:
+        if relationship_type:
                 query = f"""
                 MATCH (source:Memory {{id: $source_id}})-[r:`{relationship_type}`]->(target:Memory {{id: $target_id}})
                 DELETE r
                 RETURN count(r) as deleted
                 """
-            else:
+        else:
                 # Delete all relationships between the nodes
                 query = """
                 MATCH (source:Memory {id: $source_id})-[r]->(target:Memory {id: $target_id})
@@ -190,47 +176,39 @@ class GenericMemoryRepository(Generic[T]):
                 RETURN count(r) as deleted
                 """
 
-            result = await self.session.run(
+        result = await self.session.run(
                 query,
                 source_id=str(source_id),
                 target_id=str(target_id)
             )
 
-            record = await result.single()
-            deleted_count = record["deleted"] if record else 0
-            logger.debug(f"Deleted {deleted_count} relationships between {source_id} and {target_id}")
+        record = await result.single()
+        deleted_count = record["deleted"] if record else 0
+        logger.debug(f"Deleted {deleted_count} relationships between {source_id} and {target_id}")
 
-        except Exception as e:
-            logger.error(f"Failed to delete relationships {source_id} -> {target_id}: {e}")
-            raise
-
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def delete(self, memory_id: UUID, memory_type: type[T] | None = None):
         """Delete a memory and all its relationships."""
-        try:
-            if memory_type:
+        if memory_type:
                 labels = memory_type.labels()
                 labels_str = ":".join(labels)
                 query = f"""
                 MATCH (m:{labels_str} {{id: $id}})
                 DETACH DELETE m
                 """
-            else:
+        else:
                 # Delete by ID regardless of type
                 query = """
                 MATCH (m:Memory {id: $id})
                 DETACH DELETE m
                 """
 
-            await self.session.run(query, id=str(memory_id))
-            logger.debug(f"Deleted memory {memory_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to delete memory {memory_id}: {e}")
-            raise
+        await self.session.run(query, id=str(memory_id))
+        logger.debug(f"Deleted memory {memory_id}")
 
     def _build_where_clause(self, filters: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
         """Build WHERE clause from filters using safe parameterization.
-        
+
         Returns:
             Tuple of (WHERE clause, parameters dict)
         """
@@ -238,7 +216,7 @@ class GenericMemoryRepository(Generic[T]):
 
     def _build_filter_clause(self, filters: dict[str, Any] | None, alias: str = "m") -> tuple[str, dict[str, Any]]:
         """Build filter clause for similarity search (assumes WHERE already used).
-        
+
         Returns:
             Tuple of (filter clause, parameters dict)
         """

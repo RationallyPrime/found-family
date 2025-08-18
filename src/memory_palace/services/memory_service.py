@@ -85,79 +85,74 @@ class MemoryService:
 
         Implements MP-003 requirements for enhanced memory storage.
         """
-        try:
-            logger.info(f"Storing conversation turn for conversation {conversation_id}")
+        logger.info(f"Storing conversation turn for conversation {conversation_id}")
 
-            # Generate embeddings for both messages
-            embeddings = await self.embeddings.embed_batch(
-                [user_content, assistant_content]
+        # Generate embeddings for both messages
+        embeddings = await self.embeddings.embed_batch(
+            [user_content, assistant_content]
+        )
+
+        # Create memory objects with discriminated union types
+        # Use provided salience or default to 0.3 (regular conversation)
+        # We use 0.3 as baseline since if we're storing it, it's already worth remembering
+        memory_salience = salience if salience is not None else 0.3
+
+        friend_memory = FriendUtterance(
+            id=uuid4(),
+            content=user_content,
+            embedding=embeddings[0],
+            conversation_id=conversation_id,
+            salience=memory_salience
+        )
+
+        claude_memory = ClaudeUtterance(
+            id=uuid4(),
+            content=assistant_content,
+            embedding=embeddings[1],
+            conversation_id=conversation_id,
+            salience=memory_salience
+        )
+
+        # Auto-classify into topics if enabled and clusterer available
+        if auto_classify and self.clusterer:
+            logger.debug("Performing topic classification")
+            topic_ids = await self.clusterer.predict([embeddings[0], embeddings[1]])
+            friend_memory.topic_id = topic_ids[0] if topic_ids[0] != -1 else None
+            claude_memory.topic_id = topic_ids[1] if topic_ids[1] != -1 else None
+            logger.debug(f"Assigned topics: friend={friend_memory.topic_id}, claude={claude_memory.topic_id}")
+
+        # Store memories using typed repositories
+        await self.friend_repo.remember(friend_memory)
+        await self.claude_repo.remember(claude_memory)
+
+        # Create FOLLOWED_BY relationship between user and assistant
+        await self.friend_repo.connect(
+            friend_memory.id,
+            claude_memory.id,
+            "FOLLOWED_BY",
+            {"strength": 1.0, "sequence": "conversation_turn"}
+        )
+
+        # Detect relationships with existing memories if enabled
+        if detect_relationships:
+            logger.debug("Detecting semantic relationships")
+            friend_relationships = await self._detect_and_create_relationships(
+                friend_memory, similarity_threshold
+            )
+            claude_relationships = await self._detect_and_create_relationships(
+                claude_memory, similarity_threshold
             )
 
-            # Create memory objects with discriminated union types
-            # Use provided salience or default to 0.3 (regular conversation)
-            # We use 0.3 as baseline since if we're storing it, it's already worth remembering
-            memory_salience = salience if salience is not None else 0.3
-
-            friend_memory = FriendUtterance(
-                id=uuid4(),
-                content=user_content,
-                embedding=embeddings[0],
-                conversation_id=conversation_id,
-                salience=memory_salience
+            # Update salience based on relationship count and strength
+            await self._update_salience_from_relationships(
+                friend_memory, len(friend_relationships)
+            )
+            await self._update_salience_from_relationships(
+                claude_memory, len(claude_relationships)
             )
 
-            claude_memory = ClaudeUtterance(
-                id=uuid4(),
-                content=assistant_content,
-                embedding=embeddings[1],
-                conversation_id=conversation_id,
-                salience=memory_salience
-            )
-
-            # Auto-classify into topics if enabled and clusterer available
-            if auto_classify and self.clusterer:
-                logger.debug("Performing topic classification")
-                topic_ids = await self.clusterer.predict([embeddings[0], embeddings[1]])
-                friend_memory.topic_id = topic_ids[0] if topic_ids[0] != -1 else None
-                claude_memory.topic_id = topic_ids[1] if topic_ids[1] != -1 else None
-                logger.debug(f"Assigned topics: friend={friend_memory.topic_id}, claude={claude_memory.topic_id}")
-
-            # Store memories using typed repositories
-            await self.friend_repo.remember(friend_memory)
-            await self.claude_repo.remember(claude_memory)
-
-            # Create FOLLOWED_BY relationship between user and assistant
-            await self.friend_repo.connect(
-                friend_memory.id,
-                claude_memory.id,
-                "FOLLOWED_BY",
-                {"strength": 1.0, "sequence": "conversation_turn"}
-            )
-
-            # Detect relationships with existing memories if enabled
-            if detect_relationships:
-                logger.debug("Detecting semantic relationships")
-                friend_relationships = await self._detect_and_create_relationships(
-                    friend_memory, similarity_threshold
-                )
-                claude_relationships = await self._detect_and_create_relationships(
-                    claude_memory, similarity_threshold
-                )
-
-                # Update salience based on relationship count and strength
-                await self._update_salience_from_relationships(
-                    friend_memory, len(friend_relationships)
-                )
-                await self._update_salience_from_relationships(
-                    claude_memory, len(claude_relationships)
-                )
-
-            logger.info(f"Successfully stored turn: friend={friend_memory.id}, claude={claude_memory.id}")
-            return (friend_memory, claude_memory)
-
-        except Exception as e:
-            logger.error(f"Failed to store conversation turn: {e}", exc_info=True)
-            raise
+        logger.info(f"Successfully stored turn: friend={friend_memory.id}, claude={claude_memory.id}")
+        return (friend_memory, claude_memory)
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def remember_turn_atomic(
@@ -282,6 +277,7 @@ class MemoryService:
         logger.info(f"Successfully stored turn atomically: friend={friend_id}, claude={claude_id}")
         return (friend_memory, claude_memory)
 
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def _detect_and_create_relationships(
         self,
         memory: FriendUtterance | ClaudeUtterance,
@@ -290,61 +286,56 @@ class MemoryService:
         """Find and create semantic relationships using the query builder and specifications."""
         relationships = []
 
-        try:
-            query = """
+        query = """
             CALL db.index.vector.queryNodes('memory_embeddings', 5, $embedding)
             YIELD node, score
             WHERE node.id <> $id AND score > $threshold
             RETURN node as other, score as similarity
             ORDER BY similarity DESC
             """
-            result = await self.run_query(
-                query,
-                embedding=memory.embedding,
-                id=str(memory.id),
-                threshold=similarity_threshold,
+        result = await self.run_query(
+            query,
+            embedding=memory.embedding,
+            id=str(memory.id),
+            threshold=similarity_threshold,
+        )
+
+        # Process similar memories
+        async for record in result:
+            other_data = dict(record["other"])
+            similarity = record["similarity"]
+            other_id = UUID(other_data["id"])
+
+            # Infer relationship type based on content and similarity
+            rel_type = self._infer_relationship_type(
+                memory.content,
+                other_data.get("content", ""),
+                similarity
             )
 
-            # Process similar memories
-            async for record in result:
-                other_data = dict(record["other"])
-                similarity = record["similarity"]
-                other_id = UUID(other_data["id"])
+            # Create relationship using repository
+            await self.memory_repo.connect(
+                memory.id,
+                other_id,
+                rel_type,
+                {"strength": similarity, "auto_detected": True}
+            )
 
-                # Infer relationship type based on content and similarity
-                rel_type = self._infer_relationship_type(
-                    memory.content,
-                    other_data.get("content", ""),
-                    similarity
-                )
+            # Store relationship metadata as a node (for advanced querying)
+            relationship = MemoryRelationship(
+                source_id=memory.id,
+                target_id=other_id,
+                relationship_type=rel_type,
+                strength=similarity,
+                metadata={"detection_method": "vector_index"}
+            )
 
-                # Create relationship using repository
-                await self.memory_repo.connect(
-                    memory.id,
-                    other_id,
-                    rel_type,
-                    {"strength": similarity, "auto_detected": True}
-                )
+            await self.relationship_repo.remember(relationship)
+            relationships.append(relationship)
 
-                # Store relationship metadata as a node (for advanced querying)
-                relationship = MemoryRelationship(
-                    source_id=memory.id,
-                    target_id=other_id,
-                    relationship_type=rel_type,
-                    strength=similarity,
-                    metadata={"detection_method": "vector_index"}
-                )
+            logger.debug(f"Created {rel_type} relationship: {memory.id} -> {other_id} (strength={similarity:.3f})")
 
-                await self.relationship_repo.remember(relationship)
-                relationships.append(relationship)
-
-                logger.debug(f"Created {rel_type} relationship: {memory.id} -> {other_id} (strength={similarity:.3f})")
-
-            return relationships
-
-        except Exception as e:
-            logger.error(f"Failed to detect relationships for {memory.id}: {e}")
-            return relationships
+        return relationships
 
     def _infer_relationship_type(
         self,
@@ -399,22 +390,21 @@ class MemoryService:
         """
         logger.info(f"Starting multi-stage recall for query: '{query[:50]}...'")
 
-        try:
-            # Stage 1: Generate query embedding and initial vector search
-            query_embedding = await self.embeddings.embed_text(query)
-            embedding = query_embedding
+        # Stage 1: Generate query embedding and initial vector search
+        query_embedding = await self.embeddings.embed_text(query)
+        embedding = query_embedding
 
-            # Get broad candidate set using similarity search
-            candidates = await self.memory_repo.recall_any(
-                similarity_search=(embedding, 0.5),  # Lower threshold for broad search
-                limit=64
-            )
+        # Get broad candidate set using similarity search
+        candidates = await self.memory_repo.recall_any(
+            similarity_search=(embedding, 0.5),  # Lower threshold for broad search
+            limit=64
+        )
 
-            logger.debug(f"Stage 1: Found {len(candidates)} initial candidates")
+        logger.debug(f"Stage 1: Found {len(candidates)} initial candidates")
 
-            # Stage 2: Ontology boost (predict topic and boost matching memories)
-            if use_ontology_boost and self.clusterer and candidates:
-                try:
+        # Stage 2: Ontology boost (predict topic and boost matching memories)
+        if use_ontology_boost and self.clusterer and candidates:
+            try:
                     predicted_topic = await self.clusterer.predict([embedding])
                     topic_id = predicted_topic[0] if predicted_topic[0] != -1 else None
 
@@ -435,41 +425,34 @@ class MemoryService:
                         candidates = topical + non_topical
                         logger.debug(f"Stage 2: Boosted {len(topical)} memories from topic {topic_id}")
 
-                except Exception as e:
-                    logger.warning(f"Stage 2 ontology boost failed: {e}")
+            except Exception as e:
+                logger.warning(f"Stage 2 ontology boost failed: {e}")
 
-            # Stage 3: Graph expansion (traverse relationships from top candidates)
-            top_candidates = candidates[:10]  # Expand from best candidates only
-            expanded_memories = await self._expand_via_relationships(
-                top_candidates, expand_depth
-            )
+        # Stage 3: Graph expansion (traverse relationships from top candidates)
+        top_candidates = candidates[:10]  # Expand from best candidates only
+        expanded_memories = await self._expand_via_relationships(
+            top_candidates, expand_depth
+        )
 
-            # Add expanded memories to candidate set
-            candidate_ids = {m.id for m in candidates}
-            for expanded in expanded_memories:
-                if expanded.id not in candidate_ids:
-                    candidates.append(expanded)
-                    candidate_ids.add(expanded.id)
+        # Add expanded memories to candidate set
+        candidate_ids = {m.id for m in candidates}
+        for expanded in expanded_memories:
+            if expanded.id not in candidate_ids:
+                candidates.append(expanded)
+                candidate_ids.add(expanded.id)
 
-            logger.debug(f"Stage 3: Added {len(expanded_memories)} memories via graph expansion")
+        logger.debug(f"Stage 3: Added {len(expanded_memories)} memories via graph expansion")
 
-            # Stage 4: Re-rank combined set (for now, just use original similarity order)
-            # In a more sophisticated implementation, this would use cross-encoders
-            # or other re-ranking models
+        # Stage 4: Re-rank combined set (for now, just use original similarity order)
+        # In a more sophisticated implementation, this would use cross-encoders
+        # or other re-ranking models
 
-            final_results = candidates[:k]
-            logger.info(f"Multi-stage recall complete: returning {len(final_results)} memories")
+        final_results = candidates[:k]
+        logger.info(f"Multi-stage recall complete: returning {len(final_results)} memories")
 
-            return final_results
+        return final_results
 
-        except Exception as e:
-            logger.error(f"Multi-stage recall failed: {e}", exc_info=True)
-            # Fallback to simple similarity search
-            return await self.memory_repo.recall_any(
-                similarity_search=(embedding, 0.7),
-                limit=k
-            )
-
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def _expand_via_relationships(
         self,
         seed_memories: list[Memory],
@@ -495,31 +478,26 @@ class MemoryService:
         expanded: list[Memory] = []
         visited_ids = {m.id for m in seed_memories}
 
-        try:
-            for seed in seed_memories:
-                if not getattr(seed, "embedding", None):
-                    continue
-                similar = await self.memory_repo.recall_any(
-                    similarity_search=(seed.embedding, 0.7),
-                    limit=5
-                )
-                for memory in similar:
-                    if memory.id not in visited_ids and memory.id != seed.id:
-                        expanded.append(memory)
-                        visited_ids.add(memory.id)
+        for seed in seed_memories:
+            if not getattr(seed, "embedding", None):
+                continue
+            similar = await self.memory_repo.recall_any(
+                similarity_search=(seed.embedding, 0.7),
+                limit=5
+            )
+            for memory in similar:
+                if memory.id not in visited_ids and memory.id != seed.id:
+                    expanded.append(memory)
+                    visited_ids.add(memory.id)
 
-            if depth > 1:
-                recursive_expanded = await self._expand_via_relationships(expanded, depth - 1)
-                for memory in recursive_expanded:
-                    if memory.id not in visited_ids:
-                        expanded.append(memory)
-                        visited_ids.add(memory.id)
+        if depth > 1:
+            recursive_expanded = await self._expand_via_relationships(expanded, depth - 1)
+            for memory in recursive_expanded:
+                if memory.id not in visited_ids:
+                    expanded.append(memory)
+                    visited_ids.add(memory.id)
 
-            return expanded
-
-        except Exception as e:
-            logger.error(f"Vector expansion failed: {e}")
-            return []
+        return expanded
 
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=True)
     async def search_memories(

@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from memory_palace.core.base import ErrorLevel
+from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -69,110 +71,105 @@ class DreamJobOrchestrator:
         self.scheduler.shutdown(wait=True)
         logger.info("DreamJobOrchestrator shutdown complete")
 
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def refresh_salience(self):
         """Update salience with exponential decay and evict low-salience memories."""
-        try:
-            async with self.driver.session() as session:
-                result = await session.run(
-                    """
-                    MATCH (m:Memory)
-                    WHERE m.salience > 0.05
-                    SET m.salience = m.salience * $decay_factor
-                    RETURN count(m) as updated
-                    """,
-                    decay_factor=self.decay_factor,
-                )
-                record = await result.single()
-                updated = record["updated"] if record else 0
-                logger.info(f"Applied salience decay to {updated} memories")
+        async with self.driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (m:Memory)
+                WHERE m.salience > 0.05
+                SET m.salience = m.salience * $decay_factor
+                RETURN count(m) as updated
+                """,
+                decay_factor=self.decay_factor,
+            )
+            record = await result.single()
+            updated = record["updated"] if record else 0
+            logger.info(f"Applied salience decay to {updated} memories")
 
-                result = await session.run(
-                    """
-                    MATCH (m:Memory)
-                    WHERE m.salience < 0.05
-                    DETACH DELETE m
-                    RETURN count(m) as evicted
-                    """,
-                )
-                record = await result.single()
-                evicted = record["evicted"] if record else 0
-                if evicted > 0:
-                    logger.info(f"Evicted {evicted} low-salience memories")
-        except Exception as e:
-            logger.error(f"Error during salience refresh: {e}", exc_info=True)
+            result = await session.run(
+                """
+                MATCH (m:Memory)
+                WHERE m.salience < 0.05
+                DETACH DELETE m
+                RETURN count(m) as evicted
+                """,
+            )
+            record = await result.single()
+            evicted = record["evicted"] if record else 0
+            if evicted > 0:
+                logger.info(f"Evicted {evicted} low-salience memories")
 
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def cluster_recent(self):
         """Assign clusters to recent unassigned memories."""
-        try:
-            cutoff = datetime.now().timestamp() - 86400
-            async with self.driver.session() as session:
-                result = await session.run(
-                    """
-                    MATCH (m:Memory)
-                    WHERE m.topic_id IS NULL AND m.timestamp > $cutoff
-                    RETURN m.id AS id, m.embedding AS embedding
-                    ORDER BY m.timestamp DESC
-                    LIMIT 500
-                    """,
-                    cutoff=cutoff,
-                )
-                records = await result.to_list()
-                if not records:
-                    logger.debug("No unassigned memories found for clustering")
-                    return
+        cutoff = datetime.now().timestamp() - 86400
+        async with self.driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (m:Memory)
+                WHERE m.topic_id IS NULL AND m.timestamp > $cutoff
+                RETURN m.id AS id, m.embedding AS embedding
+                ORDER BY m.timestamp DESC
+                LIMIT 500
+                """,
+                cutoff=cutoff,
+            )
+            records = await result.data()
+            if not records:
+                logger.debug("No unassigned memories found for clustering")
+                return
 
-                embeddings = [r["embedding"] for r in records]
-                topic_ids = await self.clusterer.predict(embeddings)
+            embeddings = [r["embedding"] for r in records]
+            topic_ids = await self.clusterer.predict(embeddings)
 
-                assigned = 0
-                for record, topic_id in zip(records, topic_ids, strict=False):
-                    if topic_id != -1:
-                        await session.run(
-                            """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id""",
-                            id=record["id"],
-                            topic_id=topic_id,
-                        )
-                        assigned += 1
-                logger.info(f"Assigned topic IDs to {assigned} memories")
-        except Exception as e:
-            logger.error(f"Error during recent memory clustering: {e}", exc_info=True)
+            assigned = 0
+            for record, topic_id in zip(records, topic_ids, strict=False):
+                if topic_id != -1:
+                    await session.run(
+                        """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id""",
+                        id=record["id"],
+                        topic_id=topic_id,
+                    )
+                    assigned += 1
+            logger.info(f"Assigned topic IDs to {assigned} memories")
 
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def nightly_recluster(self):
         """Perform full recluster of all memories to optimize topic boundaries."""
-        try:
-            async with self.driver.session() as session:
-                result = await session.run(
-                    """
-                    MATCH (m:Memory)
-                    WHERE m.embedding IS NOT NULL
-                    RETURN m.id AS id, m.embedding AS embedding, m.topic_id AS current_topic
-                    ORDER BY m.timestamp DESC
-                    """,
-                )
-                records = await result.to_list()
-                if len(records) < 10:
-                    logger.info("Insufficient memories for full recluster")
-                    return
+        async with self.driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (m:Memory)
+                WHERE m.embedding IS NOT NULL
+                RETURN m.id AS id, m.embedding AS embedding, m.topic_id AS current_topic
+                ORDER BY m.timestamp DESC
+                """,
+            )
+            records = await result.data()
+            if len(records) < 10:
+                logger.info("Insufficient memories for full recluster")
+                return
 
-                embeddings = [r["embedding"] for r in records]
-                await self.clusterer.fit(embeddings)
-                new_topic_ids = await self.clusterer.predict(embeddings)
+            embeddings = [r["embedding"] for r in records]
+            await self.clusterer.fit(embeddings)
+            new_topic_ids = await self.clusterer.predict(embeddings)
 
-                updated = 0
-                for record, new_id in zip(records, new_topic_ids, strict=False):
-                    if record["current_topic"] != new_id:
-                        await session.run(
-                            """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id""",
-                            id=record["id"],
-                            topic_id=new_id,
-                        )
-                        updated += 1
-                await self.clusterer.save_model(session)
-                logger.info(
-                    f"Full recluster complete - updated {updated} topic assignments"
-                )
-        except Exception as e:
-            logger.error(f"Error during nightly recluster: {e}", exc_info=True)
+            updated = 0
+            for record, new_id in zip(records, new_topic_ids, strict=False):
+                if record["current_topic"] != new_id:
+                    await session.run(
+                        """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id""",
+                        id=record["id"],
+                        topic_id=new_id,
+                    )
+                    updated += 1
+            # Note: save_model method doesn't exist on ClusteringService
+            # await self.clusterer.save_model(session)
+            logger.info(
+                f"Full recluster complete - updated {updated} topic assignments"
+            )
 
     def get_job_status(self) -> dict:
         """Get status of all scheduled jobs."""
