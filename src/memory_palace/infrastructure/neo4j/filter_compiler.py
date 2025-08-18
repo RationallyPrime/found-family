@@ -88,7 +88,7 @@ def compile_filters(
             # Unknown operator, treat as equality with suffix
             add_clause(f"{alias}.{field}__{op} = {{param}}", value)
     
-    def process_filters(filter_dict: dict[str, Any], parent_op: str = "AND") -> list[str]:
+    def process_filters(filter_dict: dict[str, Any], parent_op: str = "AND") -> list[str]:  # noqa: ARG001
         """Recursively process filter dictionary."""
         local_clauses = []
         
@@ -146,10 +146,7 @@ def compile_filters(
     process_filters(filters)
     
     # Build WHERE clause
-    if clauses:
-        where_clause = "WHERE " + " AND ".join(clauses)
-    else:
-        where_clause = ""
+    where_clause = "WHERE " + " AND ".join(clauses) if clauses else ""
     
     return where_clause, params
 

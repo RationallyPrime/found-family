@@ -222,10 +222,7 @@ class GenericMemoryRepository(Generic[T]):
         """
         where_clause, params = compile_filters(filters, alias=alias)
         # Remove "WHERE " prefix since similarity search already has WHERE
-        if where_clause.startswith("WHERE "):
-            filter_clause = " AND " + where_clause[6:]
-        else:
-            filter_clause = ""
+        filter_clause = " AND " + where_clause[6:] if where_clause.startswith("WHERE ") else ""
         return filter_clause, params
 
     def _record_to_memory(self, record: dict, memory_type: type[T]) -> T:

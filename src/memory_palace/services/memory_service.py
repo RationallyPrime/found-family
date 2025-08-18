@@ -164,7 +164,7 @@ class MemoryService:
         assistant_content: str,
         conversation_id: UUID | None = None,
         salience: float | None = None,
-        detect_relationships: bool = False  # Disabled by default for atomic operation
+        detect_relationships: bool = False  # Disabled by default for atomic operation  # noqa: ARG002
     ) -> Turn:
         """Store a complete conversation turn in a single atomic transaction.
 
