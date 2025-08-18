@@ -53,6 +53,37 @@ voyage_api_key:
   secret: true
   default: ""
 
+# Additional API keys (optional)
+openai_api_key:
+  type: str
+  help: OpenAI API key (optional)
+  secret: true
+  default: ""
+
+anthropic_api_key:
+  type: str
+  help: Anthropic API key (optional)  
+  secret: true
+  default: ""
+
+gemini_api_key:
+  type: str
+  help: Google Gemini API key (optional)
+  secret: true
+  default: ""
+
+logfire_token:
+  type: str
+  help: Logfire token for logging (optional)
+  secret: true
+  default: ""
+
+tailscale_authkey:
+  type: str
+  help: Tailscale auth key for remote access (optional)
+  secret: true
+  default: ""
+
 claude_api_key:
   type: str
   help: Create a secure key for Claude to connect from claude.ai (random string recommended)

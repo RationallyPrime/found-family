@@ -95,3 +95,11 @@ extra-paths = ["src"]
 [tool.ty.src]
 include = ["src/**/*.py"]
 exclude = ["__pycache__", ".venv", "build", "dist", "**/tests/**", "docs/*.py"]
+
+[tool.pyright]
+# Pyright configuration (for compatibility)
+venvPath = "."
+venv = ".venv"
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"

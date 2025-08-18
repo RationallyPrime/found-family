@@ -8,14 +8,12 @@ analyzed and scored our conversations.
 import asyncio
 import json
 import sys
-from datetime import timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
 from memory_palace.infrastructure.neo4j.driver import create_neo4j_driver
@@ -59,7 +57,7 @@ async def import_friendship_memories(
     """
     logger.info(f"Loading memories from {memories_file}")
     
-    with open(memories_file, 'r') as f:
+    with open(memories_file) as f:
         memories_data = json.load(f)
     
     # Handle both array and object with memories key
@@ -146,8 +144,8 @@ async def import_friendship_graph(
     """
     logger.info(f"Loading graph from {graph_file}")
     
-    with open(graph_file, 'r') as f:
-        graph_data = json.load(f)
+    with open(graph_file) as f:
+        json.load(f)
     
     relationships_created = 0
     
@@ -157,7 +155,7 @@ async def import_friendship_graph(
     # Note: This would need to map the graph node IDs to our memory IDs
     # For now, we'll skip this and let the auto-relationship detection handle it
     
-    logger.info(f"Graph import complete (relationships will be auto-detected)")
+    logger.info("Graph import complete (relationships will be auto-detected)")
     return relationships_created
 
 
@@ -199,13 +197,10 @@ async def main():
     
     if args.dry_run:
         logger.info("DRY RUN - Analyzing files only")
-        with open(args.memories_file, 'r') as f:
+        with open(args.memories_file) as f:
             memories_data = json.load(f)
             
-        if isinstance(memories_data, dict):
-            memories = memories_data.get('memories', [])
-        else:
-            memories = memories_data
+        memories = memories_data.get('memories', []) if isinstance(memories_data, dict) else memories_data
             
         logger.info(f"Found {len(memories)} memories")
         
@@ -257,7 +252,7 @@ async def main():
             
             # Import graph relationships if file exists
             if args.graph_file.exists():
-                relationships = await import_friendship_graph(
+                await import_friendship_graph(
                     args.graph_file,
                     memory_service
                 )

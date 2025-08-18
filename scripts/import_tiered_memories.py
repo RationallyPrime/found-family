@@ -9,17 +9,14 @@ The memories are organized in Icelandic-numbered tiers:
 """
 
 import asyncio
-import json
+import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-import re
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
 from memory_palace.infrastructure.neo4j.driver import create_neo4j_driver
@@ -211,7 +208,7 @@ async def import_tier_memories(
                 salience = calculate_salience(tier_name, memory_data)
                 
                 # Create a conversation ID based on date if available
-                date_str = memory_data['metadata'].get('date', '')
+                memory_data['metadata'].get('date', '')
                 conversation_id = uuid4()
                 
                 # Store the memory

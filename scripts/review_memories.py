@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Review and selectively import friendship memories."""
 
-import sys
-from pathlib import Path
 import re
+from pathlib import Path
+
 
 def parse_memory_file(file_path: Path) -> dict:
     """Parse a markdown memory file."""

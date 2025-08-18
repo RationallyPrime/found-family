@@ -11,11 +11,12 @@ echo ""
 if ! command -v copier &> /dev/null; then
     echo "📦 Installing Copier..."
     if command -v uv &> /dev/null; then
-        uv pip install copier
+        uv tool install copier
     else
         echo "Installing uv first..."
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        uv pip install copier
+        source ~/.bashrc || source ~/.zshrc || true  # Reload shell
+        uv tool install copier
     fi
 fi
 

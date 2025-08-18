@@ -18,8 +18,7 @@ from fastapi_mcp import FastApiMCP
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
-from memory_palace.api.endpoints import admin, core, memory, unified_query
-from memory_palace.api import oauth
+from memory_palace.api.endpoints import admin, core, memory, oauth, unified_query
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.cache import EmbeddingCache
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
@@ -164,7 +163,7 @@ app.include_router(core.router)
 app.include_router(admin.router)
 app.include_router(oauth.router)  # Include OAuth endpoints for Claude.ai MCP
 
-# Add MCP support  
+# Add MCP support
 mcp = FastApiMCP(app)
 mcp.mount_http()  # Creates MCP server at /mcp with HTTPS support
 

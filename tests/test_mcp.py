@@ -4,17 +4,18 @@ MCP Server Diagnostic Script
 Tests all required endpoints for Claude.ai MCP integration
 """
 
-import json
 import asyncio
-import aiohttp
+import json
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any
+
+import aiohttp
 
 # Configuration
 BASE_URL = "https://memory-palace.sokrates.is"
 # BASE_URL = "http://localhost:8000"  # For local testing
 
-async def test_endpoint(session: aiohttp.ClientSession, method: str, path: str, **kwargs) -> Dict[str, Any]:
+async def test_endpoint(session: aiohttp.ClientSession, method: str, path: str, **kwargs) -> dict[str, Any]:
     """Test a single endpoint."""
     url = f"{BASE_URL}{path}"
     print(f"\n📍 Testing {method} {url}")
@@ -202,9 +203,8 @@ async def main():
     # Check for fastapi-mcp (the old way)
     if results.get('mcp_discovery', {}).get('body'):
         body = results['mcp_discovery']['body']
-        if isinstance(body, dict) and 'transport' in body:
-            if 'sse' in str(body.get('transport', [])).lower():
-                print("   ⚠️  You're using SSE transport - Claude.ai needs Streamable HTTP!")
+        if isinstance(body, dict) and 'transport' in body and 'sse' in str(body.get('transport', [])).lower():
+            print("   ⚠️  You're using SSE transport - Claude.ai needs Streamable HTTP!")
 
 
 if __name__ == "__main__":

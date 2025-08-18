@@ -7,7 +7,6 @@ the old generic names (user_utterance/assistant_utterance).
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 

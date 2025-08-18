@@ -83,7 +83,7 @@ class SearchResponse(BaseModel):
 @router.post("/remember", response_model=StoreTurnResponse, operation_id="remember")
 async def remember_turn(
     request: StoreTurnRequest,
-    memory_service: MemoryService = Depends(get_memory_service),
+    memory_service: MemoryService = Depends(get_memory_service),  # noqa: B008
 ) -> StoreTurnResponse:
     """Store a conversation turn in memory."""
     try:
@@ -118,7 +118,7 @@ async def remember_turn(
 @router.post("/recall", response_model=SearchResponse, operation_id="recall")
 async def recall_memories(
     request: SearchRequest,
-    memory_service: MemoryService = Depends(get_memory_service),
+    memory_service: MemoryService = Depends(get_memory_service),  # noqa: B008
 ) -> SearchResponse:
     """Search and recall relevant memories."""
     try:

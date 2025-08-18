@@ -54,8 +54,9 @@ fi
 
 # Update config file with domain
 echo -e "${BLUE}Updating configuration...${NC}"
-sed -i "s/memory-palace.YOUR_DOMAIN.com/${DOMAIN}/g" cloudflare-tunnel-config.yml
-cp cloudflare-tunnel-config.yml ~/.cloudflared/config.yml
+SCRIPT_DIR=$(dirname "$0")
+sed -i "s/memory-palace.YOUR_DOMAIN.com/${DOMAIN}/g" "${SCRIPT_DIR}/cloudflare-tunnel-config.yml"
+cp "${SCRIPT_DIR}/cloudflare-tunnel-config.yml" ~/.cloudflared/config.yml
 echo -e "${GREEN}✓ Configuration updated${NC}"
 
 # Set up DNS routing

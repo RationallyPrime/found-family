@@ -9,7 +9,6 @@ import asyncio
 import json
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,7 +16,6 @@ from uuid import UUID, uuid4
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
 from memory_palace.infrastructure.neo4j.driver import create_neo4j_driver
@@ -105,7 +103,7 @@ def parse_conversation_file(file_path: Path) -> list[dict[str, Any]]:
     humans = re.findall(human_pattern, content, re.MULTILINE | re.DOTALL)
     assistants = re.findall(assistant_pattern, content, re.MULTILINE | re.DOTALL)
     
-    for human, assistant in zip(humans, assistants):
+    for human, assistant in zip(humans, assistants, strict=False):
         turns.append({
             'user': human.strip(),
             'assistant': assistant.strip(),
@@ -274,7 +272,7 @@ async def main():
                 total_skipped += skipped
             
             logger.info("=" * 50)
-            logger.info(f"Import complete!")
+            logger.info("Import complete!")
             logger.info(f"  Files processed: {len(files)}")
             logger.info(f"  Turns imported: {total_imported}")
             logger.info(f"  Turns skipped: {total_skipped}")

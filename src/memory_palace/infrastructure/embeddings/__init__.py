@@ -1,5 +1,5 @@
 """Embedding infrastructure."""
 
-from .voyage_simple import VoyageEmbeddingService
+from .voyage import VoyageEmbeddingService
 
 __all__ = ["VoyageEmbeddingService"]
