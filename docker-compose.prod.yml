@@ -39,6 +39,7 @@ services:
       - PALACE_NAME=${PALACE_NAME:-Found Family Memory Palace}
       - LOG_LEVEL=INFO
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-pylf_v1_us_Y3M5BTg3KhZfGLSmM8VBKq4wJNzLGTtrW6zLc1LQHP6M}
+      - DISABLE_DREAM_JOBS=${DISABLE_DREAM_JOBS:-false}
     depends_on:
       neo4j:
         condition: service_healthy

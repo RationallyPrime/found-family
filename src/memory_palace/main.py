@@ -101,14 +101,17 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         # Note: We'll create sessions per-request, not hold one open
         logger.info("💾 Services initialized and ready...")
 
-        # Initialize Dream Job Orchestrator
-        logger.info("🌙 Starting Dream Job Orchestrator...")
-        dream_orchestrator = DreamJobOrchestrator(
-            driver=neo4j_driver,
-            embeddings=embedding_service,
-            clusterer=clustering_service,
-        )
-        await dream_orchestrator.start()
+        # Initialize Dream Job Orchestrator (optional)
+        if os.getenv("DISABLE_DREAM_JOBS", "false").lower() != "true":
+            logger.info("🌙 Starting Dream Job Orchestrator...")
+            dream_orchestrator = DreamJobOrchestrator(
+                driver=neo4j_driver,
+                embeddings=embedding_service,
+                clusterer=clustering_service,
+            )
+            await dream_orchestrator.start()
+        else:
+            logger.info("🌙 Dream Job Orchestrator disabled by environment variable")
 
         logger.info("✅ Memory Palace application started successfully!")
         logger.info("🔄 Background memory management is now active")
