@@ -9,11 +9,19 @@ Memory Palace is a Neo4j-backed persistence system for AI continuity of experien
 ## Development Commands
 
 ### Starting the Application
-```bash
-# Start all services (Neo4j + FastAPI)
-./run.sh
 
-# Or manually:
+**Development mode (with hot reload):**
+```bash
+./run.sh  # Starts Neo4j + FastAPI with auto-reload
+```
+
+**Production mode (containerized):**
+```bash
+./run-prod.sh  # Runs all services in Docker containers
+```
+
+**Manual start:**
+```bash
 docker compose up -d neo4j  # Start Neo4j
 uv run uvicorn memory_palace.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -26,23 +34,27 @@ uv run ruff format src/
 # Lint code
 uv run ruff check src/ --fix
 
-# Type checking
-uv run ty check
+# Type checking (both work)
+uv run pyright  # Full Pyright
+uv run ty check  # Alias for convenience
 ```
 
 ### Testing
 ```bash
-# Run tests (when added)
+# Run MCP integration tests
+python tests/test_mcp.py
+
+# Run unit tests (when added)
 uv run pytest
 
 # Test API endpoints
 curl -X POST http://localhost:8000/api/v1/memory/remember \
   -H "Content-Type: application/json" \
-  -d @test_memory.json
+  -d '{"user_content": "test", "assistant_content": "response"}'
 
 curl -X POST http://localhost:8000/api/v1/memory/recall \
   -H "Content-Type: application/json" \
-  -d @test_recall.json
+  -d '{"query": "test", "k": 5}'
 ```
 
 ## Architecture
@@ -51,7 +63,9 @@ curl -X POST http://localhost:8000/api/v1/memory/recall \
 
 1. **FastAPI Backend** (`src/memory_palace/main.py`)
    - REST API at `/api/v1`
-   - MCP integration at `/mcp`
+   - MCP discovery at `/.well-known/mcp`
+   - OAuth endpoints at `/oauth/*`
+   - Streamable HTTP transport at `/mcp/stream`
    - CORS enabled for localhost:3000
 
 2. **Neo4j Graph Database**
@@ -76,16 +90,37 @@ curl -X POST http://localhost:8000/api/v1/memory/recall \
 
 ### API Endpoints
 
+**Memory Operations:**
 - `POST /api/v1/memory/remember` - Store a conversation turn
 - `POST /api/v1/memory/recall` - Search memories semantically
+- `POST /api/v1/unified_query` - Advanced query interface
 - `GET /api/v1/memory/health` - Service health check
+
+**OAuth/MCP Integration:**
+- `GET /.well-known/mcp` - MCP discovery endpoint
+- `GET /.well-known/oauth-authorization-server` - OAuth metadata
+- `GET /oauth/authorize` - OAuth authorization
+- `POST /oauth/token` - Token exchange
+- `POST /oauth/register` - Dynamic client registration
+
+**Admin Operations:**
+- `POST /api/v1/admin/jobs/trigger/{job_id}` - Trigger background jobs
+- `GET /api/v1/admin/cache/stats` - Cache statistics
 
 ### Environment Variables
 
 Required in `.env`:
 - `VOYAGE_API_KEY` - For embedding generation
 - `NEO4J_URI` - Database connection (default: bolt://localhost:7687)
-- `NEO4J_USER` / `NEO4J_PASSWORD` - Auth credentials
+- `NEO4J_USER` / `NEO4J_PASSWORD` - Database auth
+- `CLAUDE_API_KEY` - OAuth client secret for Claude.ai
+
+Optional:
+- `OPENAI_API_KEY` - OpenAI integration
+- `ANTHROPIC_API_KEY` - Anthropic API access
+- `GEMINI_API_KEY` - Google Gemini
+- `LOGFIRE_TOKEN` - Structured logging
+- `JWT_SECRET_KEY` - OAuth token signing
 
 ## Key Implementation Details
 
@@ -117,10 +152,48 @@ Conversation
 4. API docs at http://localhost:8000/docs
 5. Format and lint before committing: `uv run ruff format src/ && uv run ruff check src/`
 
+## Project Organization
+
+### Scripts Directory
+
+```
+scripts/
+├── README.md                    # Script documentation
+├── infrastructure/              # Infrastructure setup
+│   ├── cloudflare-tunnel-config.yml
+│   ├── cloudflared-memory-palace.service
+│   └── setup-cloudflare-tunnel.sh
+├── import_curated_memories.py   # Import curated memories
+├── import_friendship_memories.py # Import friendship data
+├── import_tiered_memories.py    # Import tiered memories
+├── migrate_memory_types.py      # Database migrations
+└── review_memories.py           # Memory review tool
+```
+
+### Production Deployment
+
+1. **Set up Cloudflare Tunnel:**
+```bash
+./scripts/infrastructure/setup-cloudflare-tunnel.sh
+```
+
+2. **Install systemd service:**
+```bash
+sudo cp scripts/infrastructure/cloudflared-memory-palace.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable cloudflared-memory-palace
+sudo systemctl start cloudflared-memory-palace
+```
+
+3. **Run production stack:**
+```bash
+./run-prod.sh
+```
+
 ## Future Features (In Progress)
 
 - Topic clustering for automatic organization
-- Salience scoring for memory importance
+- Salience scoring for memory importance  
 - Ontology learning and evolution
 - BERTopic integration for topic modeling
 - HDBSCAN clustering for semantic groups

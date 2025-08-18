@@ -68,3 +68,4 @@ friendship_memories/
 *.conversation.json
 *.conversation.txt
 *.memory.json
+convo.txt

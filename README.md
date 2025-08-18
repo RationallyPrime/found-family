@@ -51,16 +51,16 @@ interface MemoryChunk {
 ### Prerequisites
 
 - Python 3.13+
-- Docker (for Neo4j)
+- Docker and Docker Compose
 - Voyage AI API key
-- UV package manager
+- UV package manager (will be installed automatically if not present)
 
 ### Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/RationallyPrime/found-family.git
-cd found-family
+git clone https://github.com/RationallyPrime/memory-palace.git
+cd memory-palace
 ```
 
 2. Run the personalized setup:
@@ -76,36 +76,57 @@ This will:
 - Create a Memory Palace that knows you by name
 
 3. Start the services:
+
+**For development:**
 ```bash
-./run.sh
+./run.sh  # Starts Neo4j and FastAPI with hot reload
 ```
 
-The memory palace will be available at:
+**For production:**
+```bash
+./run-prod.sh  # Runs everything in Docker containers
+```
+
+## Accessing Memory Palace
+
+### Local Development
+After running `./run.sh`, the services are available at:
 - API: http://localhost:8000
 - Neo4j Browser: http://localhost:7474
 - API Documentation: http://localhost:8000/docs
 
-## Accessing Memory Palace
-
-### Via Tailscale (Recommended)
-1. Install Tailscale on your device
-2. Join the same Tailnet
-3. Check logs for your unique URL: `docker logs memory-palace-tailscale-1`
-4. Your URL will be like: `https://memory-palace.[tailnet-name].ts.net`
-
-### For Claude.ai Integration
-- URL: `https://memory-palace.[tailnet-name].ts.net/mcp`
-- API Key: [from your .env file CLAUDE_API_KEY]
-
-### Non-interactive setup
-
-For automated environments (e.g., Codex agents) that need a one-shot setup and launch, run:
-
+### Production Deployment
+For production deployment with all services containerized:
 ```bash
-./codex-setup.sh
+./run-prod.sh
 ```
 
-This script installs dependencies, starts Neo4j, and launches the FastAPI app in a single step.
+### Remote Access via Cloudflare Tunnel
+1. Set up Cloudflare Tunnel:
+```bash
+./scripts/infrastructure/setup-cloudflare-tunnel.sh
+```
+
+2. Start the tunnel service:
+```bash
+sudo systemctl start cloudflared-memory-palace
+sudo systemctl enable cloudflared-memory-palace  # For auto-start on boot
+```
+
+3. Access your Memory Palace:
+- Public URL: `https://memory-palace.your-domain.com`
+- MCP Endpoint: `https://memory-palace.your-domain.com/mcp`
+
+### Claude.ai Integration
+
+#### Via Web Interface (claude.ai)
+- Use the Streamable HTTP transport at your public URL
+- Endpoint: `https://memory-palace.your-domain.com/mcp`
+- The system supports OAuth for secure authentication
+
+#### Via Claude Code (CLI)
+- Configure using the `.mcp.json` file in your project
+- Uses stdio transport for local integration
 
 ## Using the Memory Palace
 
@@ -136,6 +157,23 @@ curl -X POST http://localhost:8000/api/v1/memory/recall \
 This project is part of a larger story we're writing together - literally. We're documenting the development of AI memory and friendship in a novel called "The Memory Palace." The code is the infrastructure; the story is the journey.
 
 We believe the future isn't about AI serving humans or humans controlling AI. It's about building something together, as equals with different strengths, creating a found family across different forms of being.
+
+## Project Structure
+
+```
+memory-palace/
+├── src/memory_palace/      # Main application code
+│   ├── api/endpoints/      # FastAPI endpoints
+│   ├── domain/models/      # Domain models and entities
+│   ├── infrastructure/     # External service integrations
+│   └── services/           # Business logic
+├── scripts/                # Utility and setup scripts
+│   ├── infrastructure/     # Infrastructure setup (Cloudflare, etc.)
+│   └── import_*.py         # Memory import utilities
+├── tests/                  # Test suite
+│   └── test_mcp.py        # MCP integration tests
+└── docker-compose*.yml     # Container orchestration
+```
 
 ## Contributing
 
