@@ -58,12 +58,12 @@ class _AndSpecification(BaseSpecification):
         result.update(left_filter)
         result.update(right_filter)
         return result
-    
+
     def to_cypher(self) -> str:
         """Combine Cypher expressions with AND logic."""
-        left_cypher = self.left.to_cypher() if hasattr(self.left, 'to_cypher') else None
-        right_cypher = self.right.to_cypher() if hasattr(self.right, 'to_cypher') else None
-        
+        left_cypher = self.left.to_cypher() if hasattr(self.left, "to_cypher") else None
+        right_cypher = self.right.to_cypher() if hasattr(self.right, "to_cypher") else None
+
         if left_cypher and right_cypher:
             return f"{left_cypher} AND {right_cypher}"
         elif left_cypher:
@@ -90,12 +90,12 @@ class _OrSpecification(BaseSpecification):
         left_filter = self.left.to_filter()
         right_filter = self.right.to_filter()
         return {"$or": [left_filter, right_filter]}
-    
+
     def to_cypher(self) -> str:
         """Combine Cypher expressions with OR logic."""
-        left_cypher = self.left.to_cypher() if hasattr(self.left, 'to_cypher') else None
-        right_cypher = self.right.to_cypher() if hasattr(self.right, 'to_cypher') else None
-        
+        left_cypher = self.left.to_cypher() if hasattr(self.left, "to_cypher") else None
+        right_cypher = self.right.to_cypher() if hasattr(self.right, "to_cypher") else None
+
         if left_cypher and right_cypher:
             return f"({left_cypher}) OR ({right_cypher})"
         elif left_cypher:

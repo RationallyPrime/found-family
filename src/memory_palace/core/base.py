@@ -82,9 +82,7 @@ class ErrorDetails(BaseModel, plugin_settings=PluginSettings(logfire={"record": 
 
     source: str = Field(description="Component or module where the error occurred")
     operation: str = Field(description="Operation being performed when the error occurred")
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(), description="When the error occurred"
-    )
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(), description="When the error occurred")
 
     # Ensure timestamp is serialized consistently
     @field_serializer("timestamp")

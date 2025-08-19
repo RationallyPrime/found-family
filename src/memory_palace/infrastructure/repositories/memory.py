@@ -1,4 +1,4 @@
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast, LiteralString
 from uuid import UUID
 
 from neo4j import AsyncSession
@@ -9,6 +9,10 @@ from memory_palace.core.logging import get_logger
 from memory_palace.domain.models.base import GraphModel
 from memory_palace.domain.models.memories import Memory
 from memory_palace.infrastructure.neo4j.filter_compiler import compile_filters
+from memory_palace.infrastructure.neo4j.queries import (
+    MemoryQueries,
+    QueryFactory,
+)
 
 logger = get_logger(__name__)
 
@@ -25,23 +29,14 @@ class GenericMemoryRepository(Generic[T]):
     async def remember(self, memory: T) -> T:
         """Store any type of memory with full type safety."""
         labels = memory.labels()
-        labels_str = ":".join(labels)
         properties = memory.to_neo4j_properties()
 
         logger.debug(f"Storing {memory.__class__.__name__} with labels: {labels}")
 
-        # Use MERGE to handle both create and update scenarios
-        query = f"""
-        MERGE (m:{labels_str} {{id: $id}})
-        SET m += $properties
-        RETURN m
-        """
+        # Use centralized query for MERGE
+        query, _ = MemoryQueries.store_memory_merge(labels)
 
-        result = await self.session.run(
-            query,
-            id=str(memory.id),
-            properties=properties
-        )
+        result = await self.session.run(cast(LiteralString, query), id=str(memory.id), properties=properties)
 
         # Verify the memory was stored
         record = await result.single()
@@ -58,7 +53,7 @@ class GenericMemoryRepository(Generic[T]):
         filters: dict[str, Any] | None = None,
         similarity_search: tuple[list[float], float] | None = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> list[T]:
         """Recall memories with type safety and optional similarity search."""
         # Get labels from the memory type class
@@ -67,36 +62,17 @@ class GenericMemoryRepository(Generic[T]):
 
         if similarity_search:
             embedding, threshold = similarity_search
-            filter_clause, filter_params = self._build_filter_clause(filters, alias='node')
-            query = f"""
-            CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
-            YIELD node, score
-            WHERE node:{labels_str} AND score > $threshold
-            {filter_clause}
-            RETURN node as m, score as similarity
-            ORDER BY similarity DESC
-            SKIP $offset LIMIT $limit
-            """
-            params = {
-                "embedding": embedding,
-                "threshold": threshold,
-                "offset": offset,
-                "limit": limit,
-                "k": max(limit * 3, 50),  # Widen k for better recall
-                **filter_params
-            }
+            # Use centralized query factory
+            query, params = QueryFactory.build_similarity_search(
+                embedding=embedding, threshold=threshold, limit=limit, offset=offset, labels=labels_str, filters=filters
+            )
         else:
-            where_clause, where_params = self._build_where_clause(filters)
-            query = f"""
-            MATCH (m:{labels_str})
-            {where_clause}
-            RETURN m
-            ORDER BY m.timestamp DESC
-            SKIP $offset LIMIT $limit
-            """
-            params = {"offset": offset, "limit": limit, **where_params}
+            # Use centralized query factory
+            query, params = QueryFactory.build_filtered_recall(
+                labels=labels, filters=filters, limit=limit, offset=offset
+            )
 
-        result = await self.session.run(query, **params)
+        result = await self.session.run(cast(LiteralString, query), **params)
 
         memories = []
         async for record in result:
@@ -114,14 +90,11 @@ class GenericMemoryRepository(Generic[T]):
     async def get_by_id(self, memory_id: UUID, memory_type: type[T]) -> T | None:
         """Get a specific memory by ID with type safety."""
         labels = memory_type.labels()
-        labels_str = ":".join(labels)
 
-        query = f"""
-        MATCH (m:{labels_str} {{id: $id}})
-        RETURN m
-        """
+        # Use centralized query
+        query, _ = MemoryQueries.get_memory_by_id(labels)
 
-        result = await self.session.run(query, id=str(memory_id))
+        result = await self.session.run(cast(LiteralString, query), id=str(memory_id))
         record = await result.single()
 
         if record:
@@ -130,57 +103,25 @@ class GenericMemoryRepository(Generic[T]):
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def connect(
-        self,
-        source_id: UUID,
-        target_id: UUID,
-        relationship_type: str,
-        properties: dict[str, Any] | None = None
+        self, source_id: UUID, target_id: UUID, relationship_type: str, properties: dict[str, Any] | None = None
     ):
         """Create a relationship between two memories."""
-        query = """
-            MATCH (source:Memory {id: $source_id})
-            MATCH (target:Memory {id: $target_id})
-            MERGE (source)-[r:`{rel_type}`]->(target)
-            SET r += $properties
-            RETURN r
-            """.replace("{rel_type}", relationship_type)
+        # Use centralized query - note: we need to handle relationship type injection
+        # For now, use the base query and replace the relationship type
+        base_query, _ = MemoryQueries.create_relationship()
+        query = base_query.replace(":RELATES_TO]", f":`{relationship_type}`]")
 
-        await self.session.run(
-                query,
-                source_id=str(source_id),
-                target_id=str(target_id),
-                properties=properties or {}
-            )
+        await self.session.run(cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id), properties=properties or {})
 
         logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
-    async def disconnect(
-        self,
-        source_id: UUID,
-        target_id: UUID,
-        relationship_type: str | None = None
-    ):
+    async def disconnect(self, source_id: UUID, target_id: UUID, relationship_type: str | None = None):
         """Remove relationship(s) between two memories."""
-        if relationship_type:
-                query = f"""
-                MATCH (source:Memory {{id: $source_id}})-[r:`{relationship_type}`]->(target:Memory {{id: $target_id}})
-                DELETE r
-                RETURN count(r) as deleted
-                """
-        else:
-                # Delete all relationships between the nodes
-                query = """
-                MATCH (source:Memory {id: $source_id})-[r]->(target:Memory {id: $target_id})
-                DELETE r
-                RETURN count(r) as deleted
-                """
+        # Use centralized query
+        query, _ = MemoryQueries.delete_relationship(relationship_type)
 
-        result = await self.session.run(
-                query,
-                source_id=str(source_id),
-                target_id=str(target_id)
-            )
+        result = await self.session.run(cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id))
 
         record = await result.single()
         deleted_count = record["deleted"] if record else 0
@@ -190,20 +131,20 @@ class GenericMemoryRepository(Generic[T]):
     async def delete(self, memory_id: UUID, memory_type: type[T] | None = None):
         """Delete a memory and all its relationships."""
         if memory_type:
-                labels = memory_type.labels()
-                labels_str = ":".join(labels)
-                query = f"""
+            labels = memory_type.labels()
+            labels_str = ":".join(labels)
+            query = f"""
                 MATCH (m:{labels_str} {{id: $id}})
                 DETACH DELETE m
                 """
         else:
-                # Delete by ID regardless of type
-                query = """
+            # Delete by ID regardless of type
+            query = """
                 MATCH (m:Memory {id: $id})
                 DETACH DELETE m
                 """
 
-        await self.session.run(query, id=str(memory_id))
+        await self.session.run(cast(LiteralString, query), id=str(memory_id))
         logger.debug(f"Deleted memory {memory_id}")
 
     def _build_where_clause(self, filters: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
@@ -243,42 +184,31 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         filters: dict[str, Any] | None = None,
         similarity_search: tuple[list[float], float] | None = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> list[Memory]:
         """Recall memories of any type using the discriminated union."""
         try:
             if similarity_search:
                 embedding, threshold = similarity_search
-                filter_clause, filter_params = self._build_filter_clause(filters, alias='node')
-                query = f"""
-                CALL db.index.vector.queryNodes('memory_embeddings', $k, $embedding)
-                YIELD node, score
-                WHERE score > $threshold{filter_clause}
-                RETURN node as m, score as similarity
-                ORDER BY similarity DESC
-                SKIP $offset LIMIT $limit
-                """
-
-                params = {
-                    "embedding": embedding,
-                    "threshold": threshold,
-                    "offset": offset,
-                    "limit": limit,
-                    "k": limit,
-                    **filter_params
-                }
+                # Use centralized query factory (no specific labels for Memory union)
+                query, params = QueryFactory.build_similarity_search(
+                    embedding=embedding,
+                    threshold=threshold,
+                    limit=limit,
+                    offset=offset,
+                    labels=None,  # No specific labels for discriminated union
+                    filters=filters,
+                )
             else:
-                where_clause, filter_params = self._build_where_clause(filters)
-                query = f"""
-                MATCH (m:Memory)
-                {where_clause}
-                RETURN m
-                ORDER BY m.timestamp DESC
-                SKIP $offset LIMIT $limit
-                """
-                params = {"offset": offset, "limit": limit, **filter_params}
+                # Use centralized query factory
+                query, params = QueryFactory.build_filtered_recall(
+                    labels=["Memory"],  # Base Memory label
+                    filters=filters,
+                    limit=limit,
+                    offset=offset,
+                )
 
-            result = await self.session.run(query, **params)
+            result = await self.session.run(cast(LiteralString, query), **params)
 
             memories = []
             async for record in result:

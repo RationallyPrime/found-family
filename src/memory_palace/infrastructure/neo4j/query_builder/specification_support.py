@@ -12,7 +12,7 @@ class SpecificationSupport:
     def where_spec(self: "CypherQueryBuilder", spec: Specification) -> "CypherQueryBuilder":
         """Apply a specification as a WHERE clause."""
         # Check if spec has Cypher support
-        if hasattr(spec, 'to_cypher') and callable(getattr(spec, 'to_cypher')):  # noqa: B009
+        if hasattr(spec, "to_cypher") and callable(getattr(spec, "to_cypher")):  # noqa: B009
             cypher = spec.to_cypher()  # type: ignore
             return self.where(cypher)
 
@@ -58,7 +58,9 @@ class SpecificationSupport:
                                 or_conditions.append(f"m.{field} <= {or_value}")
                             # Add other operators as needed
                         else:
-                            or_conditions.append(f"m.{or_key} = {repr(or_value) if isinstance(or_value, str) else or_value}")
+                            or_conditions.append(
+                                f"m.{or_key} = {repr(or_value) if isinstance(or_value, str) else or_value}"
+                            )
                     if or_conditions:
                         or_parts.append(" AND ".join(or_conditions))
 

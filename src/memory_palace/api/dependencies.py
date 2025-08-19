@@ -19,21 +19,15 @@ clustering_service: DBSCANClusteringService | None = None
 
 async def get_memory_service() -> AsyncGenerator[MemoryService]:
     """Get memory service instance with per-request session and proper cleanup.
-    
+
     Uses async generator pattern to ensure session is properly closed after request.
     Injects the global clustering service to avoid reloading the model.
     """
     if neo4j_driver is None or embedding_service is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Services not initialized"
-        )
+        raise HTTPException(status_code=503, detail="Services not initialized")
     if clustering_service is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Clustering service not initialized"
-        )
-    
+        raise HTTPException(status_code=503, detail="Clustering service not initialized")
+
     # Create a new session for this request with proper lifecycle management
     async with neo4j_driver.session() as session:
         service = MemoryService(
@@ -43,7 +37,7 @@ async def get_memory_service() -> AsyncGenerator[MemoryService]:
         # Inject the global clustering service instead of creating a new one
         service.clusterer = clustering_service
         # No need to call initialize() since clusterer is already loaded
-        
+
         try:
             yield service
         finally:

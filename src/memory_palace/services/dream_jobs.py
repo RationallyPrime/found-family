@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from memory_palace.core.base import ErrorLevel
 from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
+from memory_palace.infrastructure.neo4j.queries import DreamJobQueries
 
 if TYPE_CHECKING:
     from neo4j import AsyncDriver
@@ -75,27 +76,19 @@ class DreamJobOrchestrator:
     async def refresh_salience(self):
         """Update salience with exponential decay and evict low-salience memories."""
         async with self.driver.session() as session:
+            # Use centralized query
+            query, _ = DreamJobQueries.refresh_salience()
             result = await session.run(
-                """
-                MATCH (m:Memory)
-                WHERE m.salience > 0.05
-                SET m.salience = m.salience * $decay_factor
-                RETURN count(m) as updated
-                """,
+                query,
                 decay_factor=self.decay_factor,
             )
             record = await result.single()
             updated = record["updated"] if record else 0
             logger.info(f"Applied salience decay to {updated} memories")
 
-            result = await session.run(
-                """
-                MATCH (m:Memory)
-                WHERE m.salience < 0.05
-                DETACH DELETE m
-                RETURN count(m) as evicted
-                """,
-            )
+            # Use centralized query for eviction
+            query, _ = DreamJobQueries.evict_low_salience()
+            result = await session.run(query)
             record = await result.single()
             evicted = record["evicted"] if record else 0
             if evicted > 0:
@@ -106,14 +99,10 @@ class DreamJobOrchestrator:
         """Assign clusters to recent unassigned memories."""
         cutoff = datetime.now().timestamp() - 86400
         async with self.driver.session() as session:
+            # Use centralized query
+            query, _ = DreamJobQueries.find_unassigned_memories()
             result = await session.run(
-                """
-                MATCH (m:Memory)
-                WHERE m.topic_id IS NULL AND m.timestamp > $cutoff
-                RETURN m.id AS id, m.embedding AS embedding
-                ORDER BY m.timestamp DESC
-                LIMIT 500
-                """,
+                query,
                 cutoff=cutoff,
             )
             records = await result.data()
@@ -127,8 +116,10 @@ class DreamJobOrchestrator:
             assigned = 0
             for record, topic_id in zip(records, topic_ids, strict=False):
                 if topic_id != -1:
+                    # Use centralized query
+                    query, _ = DreamJobQueries.assign_topic()
                     await session.run(
-                        """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id""",
+                        query,
                         id=record["id"],
                         topic_id=topic_id,
                     )
@@ -139,14 +130,9 @@ class DreamJobOrchestrator:
     async def nightly_recluster(self):
         """Perform full recluster of all memories to optimize topic boundaries."""
         async with self.driver.session() as session:
-            result = await session.run(
-                """
-                MATCH (m:Memory)
-                WHERE m.embedding IS NOT NULL
-                RETURN m.id AS id, m.embedding AS embedding, m.topic_id AS current_topic
-                ORDER BY m.timestamp DESC
-                """,
-            )
+            # Use centralized query
+            query, _ = DreamJobQueries.get_all_memories_for_clustering()
+            result = await session.run(query)
             records = await result.data()
             if len(records) < 10:
                 logger.info("Insufficient memories for full recluster")
@@ -159,17 +145,17 @@ class DreamJobOrchestrator:
             updated = 0
             for record, new_id in zip(records, new_topic_ids, strict=False):
                 if record["current_topic"] != new_id:
+                    # Use centralized query
+                    query, _ = DreamJobQueries.assign_topic()
                     await session.run(
-                        """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id""",
+                        query,
                         id=record["id"],
                         topic_id=new_id,
                     )
                     updated += 1
             # Note: save_model method doesn't exist on ClusteringService
             # await self.clusterer.save_model(session)
-            logger.info(
-                f"Full recluster complete - updated {updated} topic assignments"
-            )
+            logger.info(f"Full recluster complete - updated {updated} topic assignments")
 
     def get_job_status(self) -> dict:
         """Get status of all scheduled jobs."""

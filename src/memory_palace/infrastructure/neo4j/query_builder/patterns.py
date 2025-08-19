@@ -98,9 +98,7 @@ class RelationshipPattern:
         self.min_hops: int | None = None
         self.max_hops: int | None = None
 
-    def with_length(
-        self, min_hops: int | None = None, max_hops: int | None = None
-    ) -> "RelationshipPattern":
+    def with_length(self, min_hops: int | None = None, max_hops: int | None = None) -> "RelationshipPattern":
         """Set the length for variable-length relationships.
 
         Args:

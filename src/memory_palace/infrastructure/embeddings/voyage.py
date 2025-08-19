@@ -67,7 +67,7 @@ class VoyageEmbeddingService:
     # voyageai client doesn't expose a public type, so we use Any here
     client: Any  # voyageai.AsyncClient
     cache: EmbeddingCache | None = None
-    
+
     # Circuit breaker for API calls
     _circuit_breaker: CircuitBreaker
     _retry_handler: RetryWithCircuitBreaker
@@ -92,7 +92,7 @@ class VoyageEmbeddingService:
 
         # Handle both SecretStr and plain string for API key
         api_key = settings.voyage_api_key
-        if hasattr(api_key, 'get_secret_value'):
+        if hasattr(api_key, "get_secret_value"):
             api_key = str(api_key.get_secret_value())  # type: ignore
         else:
             api_key = str(api_key) if api_key else ""
@@ -113,7 +113,7 @@ class VoyageEmbeddingService:
             )
 
         # Use the model from settings or the one provided, or default to voyage-3-large
-        self.model = model or getattr(settings, 'voyage_code_model', 'voyage-3-large')
+        self.model = model or getattr(settings, "voyage_code_model", "voyage-3-large")
         self.default_embedding_type = default_embedding_type
 
         # Set the environment variable for voyageai to pick up
@@ -122,7 +122,7 @@ class VoyageEmbeddingService:
         # Initialize the client which will use the environment variable
         self.client = voyageai.AsyncClient()  # type: ignore
         self.cache = cache
-        
+
         # Initialize circuit breaker for API calls
         self._circuit_breaker = CircuitBreaker(
             name="voyage_api",
@@ -131,7 +131,7 @@ class VoyageEmbeddingService:
             expected_exception_types=(RateLimitError, TimeoutError, ServiceError),
             success_threshold=2,
         )
-        
+
         # Initialize retry handler with circuit breaker
         self._retry_handler = RetryWithCircuitBreaker(
             circuit_breaker=self._circuit_breaker,
@@ -184,11 +184,11 @@ class VoyageEmbeddingService:
     async def _call_voyage_api_internal(self, texts: list[str]) -> list[list[float]]:
         """
         Internal method to call Voyage API.
-        
+
         This is wrapped by the circuit breaker.
         """
         response = await self.client.embed(texts=texts, model=self.model)
-        
+
         embeddings = getattr(response, "embeddings", [])
         if not embeddings or len(embeddings) != len(texts):
             # This is a processing error, not retryable
@@ -204,7 +204,7 @@ class VoyageEmbeddingService:
                     latency_ms=None,
                 ),
             )
-        
+
         # Success! Return the embeddings
         return [cast("list[float]", emb) for emb in embeddings]
 

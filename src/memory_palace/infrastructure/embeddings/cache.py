@@ -5,7 +5,7 @@ from neo4j import AsyncDriver
 
 class EmbeddingCache:
     """Neo4j-backed cache for embedding vectors with model awareness.
-    
+
     The cache now tracks which model generated each embedding to prevent
     serving stale embeddings when models are switched.
     """
@@ -16,17 +16,17 @@ class EmbeddingCache:
 
     async def get_cached(self, text: str, model: str) -> list[float] | None:
         """Retrieve a cached embedding if available, not expired, and from the same model.
-        
+
         Args:
             text: The text that was embedded
             model: The model name used for embedding
-            
+
         Returns:
             The cached embedding vector or None if not found/expired/wrong model
         """
         # Include model in cache key to prevent cross-model contamination
         cache_key = hashlib.md5(f"{model}::{text}".encode()).hexdigest()
-        
+
         async with self.driver.session() as session:
             result = await session.run(
                 """
@@ -43,7 +43,7 @@ class EmbeddingCache:
 
     async def store(self, text: str, model: str, embedding: list[float], dimensions: int) -> None:
         """Store an embedding in the cache with model metadata.
-        
+
         Args:
             text: The text that was embedded
             model: The model name used for embedding
@@ -52,7 +52,7 @@ class EmbeddingCache:
         """
         # Include model in cache key
         cache_key = hashlib.md5(f"{model}::{text}".encode()).hexdigest()
-        
+
         async with self.driver.session() as session:
             await session.run(
                 """

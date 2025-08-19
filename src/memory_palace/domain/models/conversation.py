@@ -37,7 +37,7 @@ class Message(BaseModel):
     content_type: ContentType = ContentType.TEXT
     embedding: list[float] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    
+
     # Ontology support
     ontology_path: list[str] = Field(default_factory=list)
     salience: float = Field(default=0.5, ge=0.0, le=1.0)

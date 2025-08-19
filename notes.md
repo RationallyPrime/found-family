@@ -1,33 +1,6 @@
 
 ## 🚨 DUPLICATION & SCATTER MAP
 
-### 1. **Query Construction Chaos** (7 different patterns!)
-
-#### Raw SQL Strings (EVERYWHERE):
-- `src/memory_palace/services/memory_service.py`
-  - Lines 139-151: Raw query for relationship detection
-  - Lines 346-357: Raw query for vector search
-  - Lines 440-451: Raw query for atomic turn storage
-  - Lines 553-563: Raw query in `_detect_and_create_relationships`
-
-- `src/memory_palace/services/dream_jobs.py`
-  - Lines 56-63: Raw query for salience refresh
-  - Lines 72-79: Raw query for eviction
-  - Lines 87-96: Raw query for clustering
-  - Lines 124-132: Raw query for recluster
-
-- `src/memory_palace/infrastructure/repositories/memory.py`
-  - Lines 33-38: Raw MERGE query
-  - Lines 62-74: Raw similarity search query
-  - Lines 76-83: Raw MATCH query
-
-#### Query Builder (BUILT BUT BARELY USED!):
-- `src/memory_palace/infrastructure/neo4j/query_builder/` - **Entire sophisticated system**
-- **Only used in**: `unified_query.py` line 265-310
-
-#### Filter Compiler (parallel system):
-- `src/memory_palace/infrastructure/neo4j/filter_compiler.py` - Safe parameterization
-- **Only used in**: `memory.py` lines 233, 243
 
 ### 2. **Embedding Service Initialization** (3 locations)
 

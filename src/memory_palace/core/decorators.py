@@ -50,7 +50,7 @@ def with_error_handling(
         Decorated function with error handling
     """
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]: #ty:ignore
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
         # Capture the original signature to preserve it
         original_signature = inspect.signature(func)
 
@@ -59,11 +59,11 @@ def with_error_handling(
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 try:
-                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs) #ty:ignore
+                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)  # ty:ignore
                 except ApplicationError as e:
                     async with ErrorContextManager(e) as ctx:
                         error_context: dict[str, Any] = {
-                            "function": func.__name__, #ty: ignore
+                            "function": func.__name__,  # ty: ignore
                             "error_context": ctx.to_dict(),
                         }
                         if error_handler:
@@ -75,7 +75,7 @@ def with_error_handling(
                         else:
                             logger.log(
                                 e.level.to_logging_level(),
-                                f"Error in {func.__name__}: {e!s}", #ty:ignore
+                                f"Error in {func.__name__}: {e!s}",  # ty:ignore
                                 extra=error_context,
                                 exc_info=True,
                             )
@@ -85,7 +85,7 @@ def with_error_handling(
                 except Exception as e:
                     async with ErrorContextManager(e) as ctx:
                         error_context = {
-                            "function": func.__name__, #ty:ignore
+                            "function": func.__name__,  # ty:ignore
                             "error_context": ctx.to_dict(),
                         }
                         if error_handler:
@@ -97,7 +97,7 @@ def with_error_handling(
                         else:
                             logger.log(
                                 error_level.to_logging_level(),
-                                f"Error in {func.__name__}: {e!s}", #ty:ignore
+                                f"Error in {func.__name__}: {e!s}",  # ty:ignore
                                 extra=error_context,
                                 exc_info=True,
                             )
@@ -107,7 +107,7 @@ def with_error_handling(
 
             # Explicitly set the signature on the wrapper to match the original function
             async_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", async_wrapper) #ty:ignore
+            return cast("Callable[P, T]", async_wrapper)  # ty:ignore
         else:
 
             @wraps(func)
@@ -117,7 +117,7 @@ def with_error_handling(
                 except ApplicationError as e:
                     with ErrorContextManager(e) as ctx:
                         error_context: dict[str, Any] = {
-                            "function": func.__name__, #ty:ignore
+                            "function": func.__name__,  # ty:ignore
                             "error_context": ctx.to_dict(),
                         }
                         if error_handler:
@@ -129,7 +129,7 @@ def with_error_handling(
                         else:
                             logger.log(
                                 e.level.to_logging_level(),
-                                f"Error in {func.__name__}: {e!s}", #ty:ignore
+                                f"Error in {func.__name__}: {e!s}",  # ty:ignore
                                 extra=error_context,
                                 exc_info=True,
                             )
@@ -139,7 +139,7 @@ def with_error_handling(
                 except Exception as e:
                     with ErrorContextManager(e) as ctx:
                         error_context = {
-                            "function": func.__name__, #ty:ignore
+                            "function": func.__name__,  # ty:ignore
                             "error_context": ctx.to_dict(),
                         }
                         if error_handler:
@@ -151,7 +151,7 @@ def with_error_handling(
                         else:
                             logger.log(
                                 error_level.to_logging_level(),
-                                f"Error in {func.__name__}: {e!s}", #ty:ignore
+                                f"Error in {func.__name__}: {e!s}",  # ty:ignore
                                 extra=error_context,
                                 exc_info=True,
                             )
@@ -161,7 +161,7 @@ def with_error_handling(
 
             # Explicitly set the signature on the wrapper to match the original function
             sync_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", sync_wrapper) #ty:ignore
+            return cast("Callable[P, T]", sync_wrapper)  # ty:ignore
 
     return decorator
 
@@ -171,7 +171,7 @@ def error_context(
 ) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """Decorator for adding error context."""
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]: #ty:ignore
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
         # Capture the original signature to preserve it
         original_signature = inspect.signature(func)
 
@@ -180,19 +180,19 @@ def error_context(
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 try:
-                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs) #ty:ignore
+                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)  # ty:ignore
                 except Exception as e:
                     async with ErrorContextManager(e):
                         logger.log(
                             error_level.to_logging_level(),
-                            f"Error context for {func.__name__}: {e!s}",#ty:ignore
+                            f"Error context for {func.__name__}: {e!s}",  # ty:ignore
                             exc_info=True,
                         )
                     raise
 
             # Explicitly set the signature on the wrapper to match the original function
             async_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", async_wrapper) #ty:ignore
+            return cast("Callable[P, T]", async_wrapper)  # ty:ignore
         else:
 
             @wraps(func)
@@ -203,7 +203,7 @@ def error_context(
                     with ErrorContextManager(e):
                         logger.log(
                             error_level.to_logging_level(),
-                            f"Error context for {func.__name__}: {e!s}", #ty:ignore
+                            f"Error context for {func.__name__}: {e!s}",  # ty:ignore
                             exc_info=True,
                         )
                     raise
@@ -220,7 +220,7 @@ def handle_error(
 ) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """Decorator for handling errors with option to raise original."""
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]: #ty:ignore
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
         # Capture the original signature to preserve it
         original_signature = inspect.signature(func)
 
@@ -229,17 +229,17 @@ def handle_error(
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 try:
-                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs) #ty:ignore
+                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)  # ty:ignore
                 except Exception as e:
                     async with ErrorContextManager(e):
                         if raise_original:
                             raise
-                        logger.error(f"Handled error in {func.__name__}: {e!s}")#ty:ignore
-                        raise RuntimeError(f"Error in {func.__name__}") #ty:ignore  # noqa: B904
+                        logger.error(f"Handled error in {func.__name__}: {e!s}")  # ty:ignore
+                        raise RuntimeError(f"Error in {func.__name__}")  # ty:ignore  # noqa: B904
 
             # Explicitly set the signature on the wrapper to match the original function
             async_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", async_wrapper) #ty:ignore
+            return cast("Callable[P, T]", async_wrapper)  # ty:ignore
         else:
 
             @wraps(func)
@@ -250,8 +250,8 @@ def handle_error(
                     with ErrorContextManager(e):
                         if raise_original:
                             raise
-                        logger.error(f"Handled error in {func.__name__}: {e!s}") #ty:ignore
-                        raise RuntimeError(f"Error in {func.__name__}") #ty:ignore  # noqa: B904
+                        logger.error(f"Handled error in {func.__name__}: {e!s}")  # ty:ignore
+                        raise RuntimeError(f"Error in {func.__name__}")  # ty:ignore  # noqa: B904
 
             # Explicitly set the signature on the wrapper to match the original function
             sync_wrapper.__signature__ = original_signature  # type: ignore

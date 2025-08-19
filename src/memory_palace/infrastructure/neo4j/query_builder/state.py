@@ -272,12 +272,8 @@ class CypherQueryState:
         elif self._clauses:
             prev_clause: ClauseType = self._clauses[-1]
             if clause_type not in self._VALID_AFTER.get(prev_clause, set[ClauseType]()):
-                valid_next = ", ".join(
-                    str(clause) for clause in self._VALID_AFTER.get(prev_clause, set[ClauseType]())
-                )
-                raise ValueError(
-                    f"Cannot add {clause_type} after {prev_clause}, valid options are: {valid_next}"
-                )
+                valid_next = ", ".join(str(clause) for clause in self._VALID_AFTER.get(prev_clause, set[ClauseType]()))
+                raise ValueError(f"Cannot add {clause_type} after {prev_clause}, valid options are: {valid_next}")
 
         # Handle segment tracking (segments are separated by WITH clauses)
         if clause_type == ClauseType.WITH:
@@ -386,12 +382,8 @@ class CypherQueryState:
         # Check if it's valid after the previous clause
         prev_clause: ClauseType = self._clauses[-1]
         if clause_type not in self._VALID_AFTER.get(prev_clause, set[ClauseType]()):
-            valid_next = ", ".join(
-                str(clause) for clause in self._VALID_AFTER.get(prev_clause, set[ClauseType]())
-            )
-            raise ValueError(
-                f"Cannot add {clause_type} after {prev_clause}, valid options are: {valid_next}"
-            )
+            valid_next = ", ".join(str(clause) for clause in self._VALID_AFTER.get(prev_clause, set[ClauseType]()))
+            raise ValueError(f"Cannot add {clause_type} after {prev_clause}, valid options are: {valid_next}")
 
         # Check for clauses that should only appear once per segment
         if clause_type in self._ONCE_PER_SEGMENT and clause_type in self._current_segment:
@@ -405,6 +397,5 @@ class CypherQueryState:
         """
         if not self._is_complete:
             raise ValueError(
-                "Query is not complete. It must end with RETURN or a write operation "
-                "(CREATE, MERGE, DELETE, SET, etc.)"
+                "Query is not complete. It must end with RETURN or a write operation (CREATE, MERGE, DELETE, SET, etc.)"
             )

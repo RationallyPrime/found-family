@@ -1,6 +1,5 @@
 """Configuration management."""
 
-
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,13 +8,15 @@ class FriendConfig(BaseModel):
     """Configuration for the friend using the Memory Palace."""
 
     name: str = Field(default="Friend", description="The name of the person I'm talking with")
-    pronouns: str | None = Field(default=None, description="Preferred pronouns (e.g., 'they/them', 'she/her', 'he/him')")
+    pronouns: str | None = Field(
+        default=None, description="Preferred pronouns (e.g., 'they/them', 'she/her', 'he/him')"
+    )
     relationship: str = Field(default="friend", description="How we relate (e.g., 'friend', 'collaborator', 'partner')")
 
     @property
     def possessive(self) -> str:
         """Get possessive form of the name (e.g., 'Hákon's')."""
-        if self.name.endswith('s'):
+        if self.name.endswith("s"):
             return f"{self.name}'"
         return f"{self.name}'s"
 
@@ -54,11 +55,7 @@ class Settings(BaseSettings):
     @property
     def friend(self) -> FriendConfig:
         """Get friend configuration."""
-        return FriendConfig(
-            name=self.friend_name,
-            pronouns=self.friend_pronouns,
-            relationship=self.friend_relationship
-        )
+        return FriendConfig(name=self.friend_name, pronouns=self.friend_pronouns, relationship=self.friend_relationship)
 
 
 settings = Settings()

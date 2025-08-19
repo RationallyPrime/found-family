@@ -38,10 +38,10 @@ class StoreTurnRequest(BaseModel):
         None,
         ge=0.0,
         le=1.0,
-        description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number"
+        description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number",
     )
 
-    @field_validator('salience')
+    @field_validator("salience")
     @classmethod
     def validate_salience(cls, v):
         if v is not None and not isinstance(v, int | float):
@@ -87,11 +87,14 @@ async def remember_turn(
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> StoreTurnResponse:
     """Store a conversation turn in memory."""
-    logger.info("Storing conversation turn", extra={
-        "user_content_length": len(request.user_content),
-        "assistant_content_length": len(request.assistant_content),
-        "conversation_id": str(request.conversation_id) if request.conversation_id else None
-    })
+    logger.info(
+        "Storing conversation turn",
+        extra={
+            "user_content_length": len(request.user_content),
+            "assistant_content_length": len(request.assistant_content),
+            "conversation_id": str(request.conversation_id) if request.conversation_id else None,
+        },
+    )
 
     user_memory, assistant_memory = await memory_service.remember_turn(
         user_content=request.user_content,
@@ -112,11 +115,7 @@ async def recall_memories(
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> SearchResponse:
     """Search and recall relevant memories."""
-    logger.info("Searching memories", extra={
-        "query": request.query,
-        "k": request.k,
-        "threshold": request.threshold
-    })
+    logger.info("Searching memories", extra={"query": request.query, "k": request.k, "threshold": request.threshold})
 
     messages = await memory_service.search_memories(
         query=request.query,
@@ -149,9 +148,7 @@ async def recall_memories(
 
         message_dicts.append(msg_dict)
 
-    logger.info("Search completed", extra={
-        "result_count": len(messages)
-    })
+    logger.info("Search completed", extra={"result_count": len(messages)})
 
     return SearchResponse(
         messages=message_dicts,

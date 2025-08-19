@@ -33,6 +33,7 @@ ACCESS_TOKEN_EXPIRE_DAYS = 30
 
 class TokenResponse(BaseModel):
     """OAuth token response."""
+
     access_token: str
     token_type: str = "bearer"
     expires_in: int
@@ -41,12 +42,14 @@ class TokenResponse(BaseModel):
 
 class TokenData(BaseModel):
     """Token payload data."""
+
     client_id: str
     scopes: list[str] = []
 
 
 class ClientRegistrationRequest(BaseModel):
     """Dynamic Client Registration Request (RFC 7591)."""
+
     client_name: str
     redirect_uris: list[str]
     grant_types: list[str] | None = ["authorization_code"]
@@ -57,6 +60,7 @@ class ClientRegistrationRequest(BaseModel):
 
 class ClientRegistrationResponse(BaseModel):
     """Dynamic Client Registration Response (RFC 7591)."""
+
     client_id: str
     client_secret: str
     client_name: str
@@ -98,7 +102,7 @@ async def oauth_metadata(request: Request):
         "userinfo_endpoint": f"{base_url}/oauth/userinfo",
         "claims_supported": ["sub", "name", "email"],
         "response_modes_supported": ["query", "fragment"],
-        "token_endpoint_auth_signing_alg_values_supported": ["HS256"]
+        "token_endpoint_auth_signing_alg_values_supported": ["HS256"],
     }
 
 
@@ -110,31 +114,35 @@ async def mcp_discovery(request: Request):
     proto = request.headers.get("x-forwarded-proto", "http")
     host = request.headers.get("host", "localhost:8000")
     base_url = f"{proto}://{host}"
-    
+
     # Get protocol version from header or use latest
     protocol_version = request.headers.get("mcp-protocol-version", "2024-11-05")
     user_agent = request.headers.get("user-agent", "")[:100]
-    
+
     with logfire.span("MCP discovery for {client}", client=user_agent) as span:
         # Set span attributes for debugging
-        span.set_attributes({
-            "mcp.protocol_version": protocol_version,
-            "mcp.base_url": base_url,
-            "request.proto": proto,
-            "request.host": host,
-            "request.user_agent": user_agent,
-            "cloudflare.forwarded_proto": request.headers.get("x-forwarded-proto"),
-            "mcp.transport_protocol": "streamable-http"
-        })
-        
+        span.set_attributes(
+            {
+                "mcp.protocol_version": protocol_version,
+                "mcp.base_url": base_url,
+                "request.proto": proto,
+                "request.host": host,
+                "request.user_agent": user_agent,
+                "cloudflare.forwarded_proto": request.headers.get("x-forwarded-proto"),
+                "mcp.transport_protocol": "streamable-http",
+            }
+        )
+
         # Structured logging for debugging
-        logger.info("MCP discovery request", 
-                   protocol_version=protocol_version,
-                   base_url=base_url,
-                   client_user_agent=user_agent,
-                   forwarded_proto=proto,
-                   transport_protocol="streamable-http")
-        
+        logger.info(
+            "MCP discovery request",
+            protocol_version=protocol_version,
+            base_url=base_url,
+            client_user_agent=user_agent,
+            forwarded_proto=proto,
+            transport_protocol="streamable-http",
+        )
+
         discovery_response = {
             "protocolVersion": protocol_version,
             "endpoint": f"{base_url}/mcp",
@@ -142,25 +150,20 @@ async def mcp_discovery(request: Request):
             "name": "Memory Palace",
             "description": "Persistent memory system for AI conversations",
             "application_slug": "memory-palace",
-            "app": {
-                "id": "memory-palace",
-                "name": "Memory Palace",
-                "slug": "memory-palace"
-            },
-            "oauth": {
-                "authorization_server": base_url,
-                "resource": f"{base_url}/mcp",
-                "scopes": ["read", "write"]
-            }
+            "app": {"id": "memory-palace", "name": "Memory Palace", "slug": "memory-palace"},
+            "oauth": {"authorization_server": base_url, "resource": f"{base_url}/mcp", "scopes": ["read", "write"]},
         }
-        
+
         # Log the response for debugging
-        logger.info("MCP discovery response", 
-                   endpoint=discovery_response["endpoint"],
-                   protocol=discovery_response["protocol"],
-                   oauth_server=discovery_response["oauth"]["authorization_server"])
-        
+        logger.info(
+            "MCP discovery response",
+            endpoint=discovery_response["endpoint"],
+            protocol=discovery_response["protocol"],
+            oauth_server=discovery_response["oauth"]["authorization_server"],
+        )
+
         return discovery_response
+
 
 @router.get("/.well-known/oauth-protected-resource", operation_id="oauth_resource")
 @router.head("/.well-known/oauth-protected-resource")
@@ -168,14 +171,14 @@ async def mcp_discovery(request: Request):
 @router.head("/.well-known/oauth-protected-resource/mcp")
 async def oauth_protected_resource(request: Request):
     """OAuth 2.0 Protected Resource Metadata (RFC 9728).
-    
+
     This indicates that the MCP resource is protected and requires OAuth.
     """
     # Detect if request came through HTTPS (Cloudflare)
     proto = request.headers.get("x-forwarded-proto", "http")
     host = request.headers.get("host", "localhost:8000")
     base_url = f"{proto}://{host}"
-    
+
     return {
         "resource": f"{base_url}/mcp",
         "authorization_servers": [
@@ -184,7 +187,7 @@ async def oauth_protected_resource(request: Request):
         "scopes_supported": ["read", "write"],
         "bearer_methods_supported": ["header"],
         "resource_documentation": f"{base_url}/mcp",
-        "resource_signing_alg_values_supported": ["HS256"]
+        "resource_signing_alg_values_supported": ["HS256"],
     }
 
 
@@ -192,11 +195,11 @@ async def oauth_protected_resource(request: Request):
 async def register_client(request: ClientRegistrationRequest):
     """Dynamic Client Registration endpoint (RFC 7591)."""
     import time
-    
+
     # Generate unique client credentials
     client_id = f"client_{secrets.token_urlsafe(16)}"
     client_secret = secrets.token_urlsafe(32)
-    
+
     # Store the registered client
     registered_clients[client_id] = {
         "client_secret": client_secret,
@@ -206,7 +209,7 @@ async def register_client(request: ClientRegistrationRequest):
         "response_types": request.response_types or ["code"],
         "scope": request.scope or "read write",
     }
-    
+
     return ClientRegistrationResponse(
         client_id=client_id,
         client_secret=client_secret,
@@ -233,14 +236,16 @@ async def authorize(
     code_challenge_method: str | None = None,  # noqa: ARG001
 ):
     """OAuth authorization endpoint - supports dynamic clients."""
-    
+
     # Structured logging for OAuth flow debugging
-    logger.info("OAuth authorization request",
-               client_id=client_id,
-               response_type=response_type,
-               redirect_uri=redirect_uri,
-               scope=scope,
-               has_pkce=bool(code_challenge))
+    logger.info(
+        "OAuth authorization request",
+        client_id=client_id,
+        response_type=response_type,
+        redirect_uri=redirect_uri,
+        scope=scope,
+        has_pkce=bool(code_challenge),
+    )
 
     if response_type != "code":
         raise HTTPException(status_code=400, detail="Unsupported response_type")
@@ -268,7 +273,7 @@ async def authorize(
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": scope,
-        "exp": datetime.now(UTC) + timedelta(minutes=10)
+        "exp": datetime.now(UTC) + timedelta(minutes=10),
     }
     auth_codes[auth_code] = code_data
     logger.info(f"Stored auth code for client {client_id}")
@@ -304,20 +309,20 @@ async def token(
         if code not in auth_codes:
             logger.warning(f"Invalid authorization code: {code[:20]}...")
             raise HTTPException(status_code=400, detail="Invalid authorization code")
-        
+
         code_data = auth_codes[code]
-        
+
         # Check if code is expired
         if datetime.now(UTC) > code_data["exp"]:
             logger.warning("Authorization code expired")
             del auth_codes[code]
             raise HTTPException(status_code=400, detail="Authorization code expired")
-        
+
         # Validate client_id matches
         if code_data["client_id"] != client_id:
             logger.warning(f"Client ID mismatch: {client_id} != {code_data['client_id']}")
             raise HTTPException(status_code=400, detail="Client ID mismatch")
-        
+
         # Remove used code
         del auth_codes[code]
         logger.info(f"Authorization code validated and consumed for client {client_id}")
@@ -340,25 +345,24 @@ async def token(
     # Create tokens
     access_token_expires = timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     access_token = create_access_token(
-        data={"sub": CLIENT_ID, "scopes": ["read", "write"]},
-        expires_delta=access_token_expires
+        data={"sub": CLIENT_ID, "scopes": ["read", "write"]}, expires_delta=access_token_expires
     )
 
-    refresh_token = create_refresh_token(
-        data={"sub": CLIENT_ID, "type": "refresh"}
-    )
+    refresh_token = create_refresh_token(data={"sub": CLIENT_ID, "type": "refresh"})
 
     return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=int(access_token_expires.total_seconds())
+        access_token=access_token, refresh_token=refresh_token, expires_in=int(access_token_expires.total_seconds())
     )
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create a JWT access token."""
     to_encode = data.copy()
-    expire = datetime.now(UTC) + expires_delta if expires_delta else datetime.now(UTC) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    expire = (
+        datetime.now(UTC) + expires_delta
+        if expires_delta
+        else datetime.now(UTC) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    )
 
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -394,7 +398,7 @@ async def introspect_token(token: str = Form(...)):
             "active": True,
             "client_id": token_data.client_id,
             "scope": " ".join(token_data.scopes),
-            "token_type": "Bearer"
+            "token_type": "Bearer",
         }
     return {"active": False}
 
@@ -418,16 +422,10 @@ async def userinfo(authorization: str = ""):
     """UserInfo endpoint (OpenID Connect)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    
+
     token = authorization.split(" ")[1]
     token_data = verify_token(token)
     if not token_data:
         raise HTTPException(status_code=401, detail="Invalid token")
-    
-    return {
-        "sub": token_data.client_id,
-        "name": "Claude MCP Client",
-        "email": "claude@anthropic.com"
-    }
 
-
+    return {"sub": token_data.client_id, "name": "Claude MCP Client", "email": "claude@anthropic.com"}

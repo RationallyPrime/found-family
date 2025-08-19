@@ -109,9 +109,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Gener
         self._param_counter += 1
         return param_name
 
-    def match(
-        self, pattern_func: Callable[[PatternBuilder], PatternBuilder]
-    ) -> "CypherQueryBuilder[T]":
+    def match(self, pattern_func: Callable[[PatternBuilder], PatternBuilder]) -> "CypherQueryBuilder[T]":
         """Add a MATCH clause to the query.
 
         Args:
@@ -140,9 +138,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Gener
 
         return self
 
-    def optional_match(
-        self, pattern_func: Callable[[PatternBuilder], PatternBuilder]
-    ) -> "CypherQueryBuilder[T]":
+    def optional_match(self, pattern_func: Callable[[PatternBuilder], PatternBuilder]) -> "CypherQueryBuilder[T]":
         """Add an OPTIONAL MATCH clause to the query.
 
         Args:
@@ -354,9 +350,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Gener
 
         return self
 
-    def create(
-        self, pattern_func: Callable[[PatternBuilder], PatternBuilder]
-    ) -> "CypherQueryBuilder[T]":
+    def create(self, pattern_func: Callable[[PatternBuilder], PatternBuilder]) -> "CypherQueryBuilder[T]":
         """Add a CREATE clause to the query.
 
         Args:
@@ -380,9 +374,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Gener
 
         return self
 
-    def set_property(
-        self, node_var: str, properties: dict[str, Any]
-    ) -> "CypherQueryBuilder[T]":
+    def set_property(self, node_var: str, properties: dict[str, Any]) -> "CypherQueryBuilder[T]":
         """Add a SET clause to set node properties.
 
         Args:
@@ -404,9 +396,7 @@ class CypherQueryBuilder(QueryBuilder, SpecificationSupport, QueryHelpers, Gener
 
         for prop_name, prop_value in properties.items():
             param_name = self.add_parameter(prop_value)
-            set_parts.append(
-                create_literal_str(prefix="", clause=f"{node_var}.{prop_name} = ${param_name}")
-            )
+            set_parts.append(create_literal_str(prefix="", clause=f"{node_var}.{prop_name} = ${param_name}"))
 
         # Join set parts with commas
         set_str: LiteralString = ", ".join(set_parts)

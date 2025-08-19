@@ -23,12 +23,9 @@ async def get_dream_orchestrator() -> DreamJobOrchestrator:
     """Dependency to get the dream orchestrator instance."""
     # Import here to avoid circular dependency
     from memory_palace.main import dream_orchestrator
-    
+
     if dream_orchestrator is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Dream orchestrator not initialized"
-        )
+        raise HTTPException(status_code=503, detail="Dream orchestrator not initialized")
     return dream_orchestrator
 
 
@@ -43,16 +40,12 @@ async def get_neo4j_driver():
 
 
 @router.get("/jobs/status", response_model=JobStatusResponse, operation_id="job_status")
-async def get_job_status(
-    orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)
-):
+async def get_job_status(orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)):
     """Get dream job orchestrator status."""
     try:
         status = orchestrator.get_job_status()
         return JobStatusResponse(
-            scheduler_running=status["scheduler_running"],
-            active_jobs=len(status["jobs"]),
-            jobs=status["jobs"]
+            scheduler_running=status["scheduler_running"], active_jobs=len(status["jobs"]), jobs=status["jobs"]
         )
 
     except Exception as e:
@@ -61,10 +54,7 @@ async def get_job_status(
 
 
 @router.post("/jobs/trigger/{job_id}", operation_id="trigger")
-async def trigger_job(
-    job_id: str,
-    orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)
-):
+async def trigger_job(job_id: str, orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)):
     """Manually trigger a specific dream job."""
     try:
         if job_id == "salience_refresh":

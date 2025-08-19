@@ -21,17 +21,12 @@ async def root():
             "specification_support",
             "dream_jobs",
             "graph_expansion",
-            "ontology_boost"
-        ]
+            "ontology_boost",
+        ],
     }
 
 
 @router.get("/health", operation_id="health")
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "timestamp": "2025-08-07T15:20:00Z"
-    }
-
-
+    return {"status": "healthy", "timestamp": "2025-08-07T15:20:00Z"}

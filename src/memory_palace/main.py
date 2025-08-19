@@ -32,16 +32,13 @@ from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 
 # Enhanced Logfire configuration with proper instrumentation
-logfire.configure(
-    service_name="memory-palace",
-    token=os.getenv("LOGFIRE_TOKEN")
-)
+logfire.configure(service_name="memory-palace", token=os.getenv("LOGFIRE_TOKEN"))
 
 # Install auto-tracing with ignore for already imported modules
 logfire.install_auto_tracing(
-    modules=['memory_palace'],
+    modules=["memory_palace"],
     min_duration=0.01,  # Only trace operations over 0.01 seconds
-    check_imported_modules='ignore'  # Ignore already imported modules
+    check_imported_modules="ignore",  # Ignore already imported modules
 )
 setup_logging()
 logger = get_logger(__name__)
@@ -77,11 +74,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         # Pass the driver, not a session, to avoid holding open a session
         embedding_cache = EmbeddingCache(neo4j_driver)
         embedding_service = VoyageEmbeddingService(cache=embedding_cache)
-        
+
         # Get the actual embedding dimensions from the service
         embedding_dims = embedding_service.get_model_dimensions()
         logger.info(f"📏 Using embedding model '{embedding_service.model}' with {embedding_dims} dimensions")
-        
+
         # Ensure vector index exists with correct dimensions
         await ensure_vector_index(neo4j_driver, dimensions=embedding_dims)
         logger.info("✅ Vector index initialized with correct dimensions")
@@ -151,7 +148,7 @@ app = FastAPI(
     title="Memory Palace API",
     description="Advanced memory management system for AI conversations",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Enable FastAPI instrumentation for request tracing
@@ -182,11 +179,4 @@ if __name__ == "__main__":
     """Development server entry point."""
     logger.info("🚀 Starting Memory Palace development server...")
 
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info",
-        access_log=True
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info", access_log=True)

@@ -42,7 +42,7 @@ class ErrorHandler:
         if isinstance(error_context.error, ApplicationError):
             response["error_code"] = error_context.error.code.value
             # Handle different types of details
-            if hasattr(error_context.error.details, 'model_dump'):
+            if hasattr(error_context.error.details, "model_dump"):
                 details_dict = error_context.error.details.model_dump()  # type: ignore
             elif isinstance(error_context.error.details, dict):
                 details_dict = error_context.error.details
@@ -58,14 +58,20 @@ class ErrorHandler:
         return response
 
     async def handle_async(
-        self, error: Exception, level: ErrorLevel, context: dict[str, Any]  # noqa: ARG002
+        self,
+        error: Exception,  # noqa: ARG002
+        level: ErrorLevel,
+        context: dict[str, Any],
     ) -> dict[str, Any]:
         """Handle error asynchronously"""
         async with self.context_manager as error_context:
             return self._format_response(error_context, level, context)
 
     def handle_sync(
-        self, error: Exception, level: ErrorLevel, context: dict[str, Any]  # noqa: ARG002
+        self,
+        error: Exception,  # noqa: ARG002
+        level: ErrorLevel,
+        context: dict[str, Any],
     ) -> dict[str, Any]:
         """Handle error synchronously"""
         with self.context_manager as error_context:
@@ -77,12 +83,6 @@ class GlobalErrorHandler(ErrorHandler):
 
     async def handle_http_exception(self, error: HTTPException) -> dict[str, Any]:
         """Handle HTTP exceptions"""
-        level = (
-            ErrorLevel.ERROR
-            if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR
-            else ErrorLevel.WARNING
-        )
-        error_context = await self.context_manager.capture_context(
-            error, status_code=error.status_code
-        )
+        level = ErrorLevel.ERROR if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else ErrorLevel.WARNING
+        error_context = await self.context_manager.capture_context(error, status_code=error.status_code)
         return self._format_response(error_context=error_context, level=level)
