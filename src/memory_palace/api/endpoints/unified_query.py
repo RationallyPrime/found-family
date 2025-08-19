@@ -210,6 +210,37 @@ class UnifiedQueryResponse(BaseModel):
     specification_tree: dict | None = None
 
 
+def parse_order_by(order_by_str: str) -> tuple[str | None, str, str] | None:
+    """Parse an order_by string like 'm.timestamp DESC' into components.
+    
+    Returns:
+        Tuple of (node_alias, field_name, direction) or None if parse fails
+        Example: 'm.timestamp DESC' -> ('m', 'timestamp', 'DESC')
+        Example: 'timestamp DESC' -> (None, 'timestamp', 'DESC')
+    """
+    if not order_by_str:
+        return None
+    
+    parts = order_by_str.strip().split()
+    if not parts:
+        return None
+    
+    # Handle both "m.field DESC" and "field DESC" formats
+    field_part = parts[0]
+    direction = parts[1].upper() if len(parts) > 1 else "ASC"
+    
+    if "." in field_part:
+        # Format: m.field
+        node_parts = field_part.split(".", 1)
+        if len(node_parts) == 2:
+            return (node_parts[0], node_parts[1], direction)
+    else:
+        # Format: field (no node alias)
+        return (None, field_part, direction)
+    
+    return None
+
+
 def build_specification(filter_spec: FilterType | dict[str, Any]):
     """Convert filter DSL to specification objects."""
 
@@ -462,7 +493,33 @@ async def execute_unified_query(
         if dsl.similarity and dsl.order_by_similarity:
             builder.order_by("similarity DESC")
         elif dsl.order_by:
-            builder.order_by(dsl.order_by)
+            # Handle DISTINCT + ORDER BY compatibility
+            if dsl.distinct:
+                # Parse the order_by to check if we need to transform it
+                parsed = parse_order_by(dsl.order_by)
+                if parsed:
+                    node_alias, field_name, direction = parsed
+                    # Check if field is in return_fields
+                    if field_name in dsl.return_fields:
+                        # Use just the field alias, not node.field
+                        transformed_order = f"{field_name} {direction}"
+                        builder.order_by(transformed_order)
+                        logger.debug(
+                            f"Transformed ORDER BY for DISTINCT: {dsl.order_by} -> {transformed_order}"
+                        )
+                    else:
+                        # Field not in RETURN clause, can't order by it with DISTINCT
+                        logger.warning(
+                            f"Cannot ORDER BY {field_name} with DISTINCT - field not in return_fields. Skipping ordering.",
+                            extra={"field": field_name, "return_fields": dsl.return_fields}
+                        )
+                else:
+                    # Couldn't parse, use as-is and hope for the best
+                    logger.warning(f"Could not parse ORDER BY clause: {dsl.order_by}")
+                    builder.order_by(dsl.order_by)
+            else:
+                # No DISTINCT, use order_by as-is
+                builder.order_by(dsl.order_by)
 
         # Add pagination
         if dsl.skip > 0:
