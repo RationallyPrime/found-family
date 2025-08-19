@@ -17,9 +17,9 @@ class MemoryQueries:
 
     @staticmethod
     def similarity_search(
-        limit: int = 10,
+        limit: int = 10,  # noqa: ARG004
         labels: str | None = None,
-        additional_filters: str | None = None,  # noqa: ARG004
+        additional_filters: str | None = None,
     ) -> tuple[LiteralString, dict[str, Any]]:
         """Standard similarity search query using vector index.
 

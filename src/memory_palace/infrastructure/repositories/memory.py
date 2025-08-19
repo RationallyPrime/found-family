@@ -1,4 +1,4 @@
-from typing import Any, Generic, TypeVar, cast, LiteralString
+from typing import Any, Generic, LiteralString, TypeVar, cast
 from uuid import UUID
 
 from neo4j import AsyncSession
@@ -111,7 +111,9 @@ class GenericMemoryRepository(Generic[T]):
         base_query, _ = MemoryQueries.create_relationship()
         query = base_query.replace(":RELATES_TO]", f":`{relationship_type}`]")
 
-        await self.session.run(cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id), properties=properties or {})
+        await self.session.run(
+            cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id), properties=properties or {}
+        )
 
         logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
 

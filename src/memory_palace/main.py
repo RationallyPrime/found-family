@@ -20,8 +20,10 @@ from neo4j import AsyncDriver
 from memory_palace.api import dependencies
 from memory_palace.api.endpoints import admin, core, memory, oauth, unified_query
 from memory_palace.core.logging import get_logger, setup_logging
-from memory_palace.infrastructure.embeddings.cache import EmbeddingCache
-from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
+from memory_palace.infrastructure.embeddings.factory import (
+    EmbeddingServiceProvider,
+    create_embedding_service,
+)
 from memory_palace.infrastructure.neo4j.driver import (
     Neo4jQuery,
     create_neo4j_driver,
@@ -47,7 +49,7 @@ logger = get_logger(__name__)
 memory_service: MemoryService | None = None
 dream_orchestrator: DreamJobOrchestrator | None = None
 neo4j_driver: AsyncDriver | None = None
-embedding_service: VoyageEmbeddingService | None = None
+embedding_service: EmbeddingServiceProvider | None = None
 clustering_service: DBSCANClusteringService | None = None
 
 
@@ -69,15 +71,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         if neo4j_driver is None:
             raise RuntimeError("Failed to initialize Neo4j driver")
 
-        # Initialize embedding service with cache first
+        # Initialize embedding service with dependency injection
         logger.info("🧮 Initializing Embedding Service...")
-        # Pass the driver, not a session, to avoid holding open a session
-        embedding_cache = EmbeddingCache(neo4j_driver)
-        embedding_service = VoyageEmbeddingService(cache=embedding_cache)
+        embedding_service = create_embedding_service(neo4j_driver=neo4j_driver, use_cache=True)
 
         # Get the actual embedding dimensions from the service
         embedding_dims = embedding_service.get_model_dimensions()
-        logger.info(f"📏 Using embedding model '{embedding_service.model}' with {embedding_dims} dimensions")
+        logger.info(f"📏 Using embedding model with {embedding_dims} dimensions")
 
         # Ensure vector index exists with correct dimensions
         await ensure_vector_index(neo4j_driver, dimensions=embedding_dims)

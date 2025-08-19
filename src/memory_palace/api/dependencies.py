@@ -5,7 +5,10 @@ from collections.abc import AsyncGenerator
 from fastapi import HTTPException
 from neo4j import AsyncDriver
 
-from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
+from memory_palace.infrastructure.embeddings.factory import (
+    EmbeddingServiceProvider,
+    validate_embedding_service,
+)
 from memory_palace.infrastructure.neo4j.driver import Neo4jQuery
 from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.memory_service import MemoryService
@@ -13,7 +16,7 @@ from memory_palace.services.memory_service import MemoryService
 # These will be set by the main.py lifespan
 neo4j_driver: AsyncDriver | None = None
 neo4j_query: Neo4jQuery | None = None
-embedding_service: VoyageEmbeddingService | None = None
+embedding_service: EmbeddingServiceProvider | None = None
 clustering_service: DBSCANClusteringService | None = None
 
 
@@ -27,6 +30,9 @@ async def get_memory_service() -> AsyncGenerator[MemoryService]:
         raise HTTPException(status_code=503, detail="Services not initialized")
     if clustering_service is None:
         raise HTTPException(status_code=503, detail="Clustering service not initialized")
+
+    # Validate embedding service is properly configured
+    validate_embedding_service(embedding_service)
 
     # Create a new session for this request with proper lifecycle management
     async with neo4j_driver.session() as session:
