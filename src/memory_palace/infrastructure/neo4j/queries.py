@@ -265,16 +265,18 @@ class DreamJobQueries:
         Returns:
             Tuple of (query, params)
         """
+        from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
+        
         builder = CypherQueryBuilder()
         builder.match(lambda p: p.node("Memory", "m"))
-        builder.where("m.salience > 0.05")
+        builder.where(f"m.salience > {SALIENCE_EVICTION_THRESHOLD}")
         builder.set_property("m", {"salience": "m.salience * $decay_factor"})
         builder.return_clause("count(m) as updated")
 
         # For now, use raw query since SET needs expression support
-        query = """
+        query = f"""
             MATCH (m:Memory)
-            WHERE m.salience > 0.05
+            WHERE m.salience > {SALIENCE_EVICTION_THRESHOLD}
             SET m.salience = m.salience * $decay_factor
             RETURN count(m) as updated
             """
@@ -288,16 +290,18 @@ class DreamJobQueries:
         Returns:
             Tuple of (query, params)
         """
+        from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
+        
         builder = CypherQueryBuilder()
         builder.match(lambda p: p.node("Memory", "m"))
-        builder.where("m.salience < 0.05")
+        builder.where(f"m.salience < {SALIENCE_EVICTION_THRESHOLD}")
         builder.detach_delete("m")
         builder.return_clause("count(m) as evicted")
 
         # Build returns validation error, use raw for now
-        query = """
+        query = f"""
             MATCH (m:Memory)
-            WHERE m.salience < 0.05
+            WHERE m.salience < {SALIENCE_EVICTION_THRESHOLD}
             WITH m, m.id as id
             DETACH DELETE m
             RETURN count(id) as evicted

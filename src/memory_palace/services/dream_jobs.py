@@ -24,11 +24,15 @@ class DreamJobOrchestrator:
         driver: "AsyncDriver",
         embeddings: "EmbeddingService",
         clusterer: "ClusteringService",
-        decay_lambda: float = 0.0154,  # 45-day half-life by default
+        decay_lambda: float | None = None,
     ):
+        from memory_palace.core.constants import SALIENCE_DECAY_FACTOR_DEFAULT
+        
         self.driver = driver
         self.embeddings = embeddings
         self.clusterer = clusterer
+        if decay_lambda is None:
+            decay_lambda = SALIENCE_DECAY_FACTOR_DEFAULT
         self.decay_factor = 1 - decay_lambda  # Convert to decay factor
         self.scheduler = AsyncIOScheduler()
         self._setup_jobs()
@@ -39,10 +43,17 @@ class DreamJobOrchestrator:
 
     def _setup_jobs(self):
         """Configure the dream jobs with proper scheduling."""
+        from memory_palace.core.constants import (
+            SALIENCE_REFRESH_INTERVAL_MINUTES,
+            CLUSTER_RECENT_INTERVAL_HOURS,
+            NIGHTLY_RECLUSTER_HOUR,
+            NIGHTLY_RECLUSTER_MINUTE,
+        )
+        
         self.scheduler.add_job(
             self.refresh_salience,
             "interval",
-            minutes=5,
+            minutes=SALIENCE_REFRESH_INTERVAL_MINUTES,
             id="salience_refresh",
             max_instances=1,
             coalesce=True,
@@ -50,7 +61,7 @@ class DreamJobOrchestrator:
         self.scheduler.add_job(
             self.cluster_recent,
             "interval",
-            hours=1,
+            hours=CLUSTER_RECENT_INTERVAL_HOURS,
             id="cluster_recent",
             max_instances=1,
             coalesce=True,
@@ -58,8 +69,8 @@ class DreamJobOrchestrator:
         self.scheduler.add_job(
             self.nightly_recluster,
             "cron",
-            hour=3,
-            minute=0,
+            hour=NIGHTLY_RECLUSTER_HOUR,
+            minute=NIGHTLY_RECLUSTER_MINUTE,
             id="nightly_recluster",
             max_instances=1,
         )

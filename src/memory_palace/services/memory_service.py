@@ -91,9 +91,9 @@ class MemoryService:
         embeddings = await self.embeddings.embed_batch([user_content, assistant_content])
 
         # Create memory objects with discriminated union types
-        # Use provided salience or default to 0.3 (regular conversation)
-        # We use 0.3 as baseline since if we're storing it, it's already worth remembering
-        memory_salience = salience if salience is not None else 0.3
+        # Use provided salience or default
+        from memory_palace.core.constants import SALIENCE_DEFAULT
+        memory_salience = salience if salience is not None else SALIENCE_DEFAULT
 
         friend_memory = FriendUtterance(
             id=uuid4(),
@@ -181,7 +181,8 @@ class MemoryService:
         turn_id = str(uuid4())
 
         # Use provided salience or default
-        memory_salience = salience if salience is not None else 0.3
+        from memory_palace.core.constants import SALIENCE_DEFAULT
+        memory_salience = salience if salience is not None else SALIENCE_DEFAULT
 
         # Use centralized query for atomic turn storage
         query, _ = MemoryQueries.atomic_turn_storage()
@@ -239,9 +240,14 @@ class MemoryService:
 
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def _detect_and_create_relationships(
-        self, memory: FriendUtterance | ClaudeUtterance, similarity_threshold: float = 0.85
+        self, memory: FriendUtterance | ClaudeUtterance, similarity_threshold: float | None = None
     ) -> list[MemoryRelationship]:
         """Find and create semantic relationships using the query builder and specifications."""
+        from memory_palace.core.constants import SIMILARITY_THRESHOLD_HIGH
+        
+        if similarity_threshold is None:
+            similarity_threshold = SIMILARITY_THRESHOLD_HIGH
+        
         relationships = []
 
         # Use centralized query for relationship detection
