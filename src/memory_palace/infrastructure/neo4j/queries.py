@@ -4,7 +4,7 @@ This is the SINGLE SOURCE OF TRUTH for all Cypher queries in the application.
 All queries should be built here using the QueryBuilder for type safety and consistency.
 """
 
-from typing import Any, LiteralString
+from typing import Any, LiteralString, cast
 
 from memory_palace.core.logging import get_logger
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
@@ -54,7 +54,7 @@ class MemoryQueries:
         query = " ".join(query_parts)
 
         # Return query with parameter placeholders
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def store_memory_merge(labels: list[str]) -> tuple[LiteralString, dict[str, Any]]:
@@ -75,7 +75,7 @@ class MemoryQueries:
         RETURN m
         """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def atomic_turn_storage() -> tuple[LiteralString, dict[str, Any]]:
@@ -126,7 +126,7 @@ class MemoryQueries:
             RETURN f, c, t
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def create_relationship(relationship_type: str = "RELATES_TO") -> tuple[LiteralString, dict[str, Any]]:
@@ -147,7 +147,7 @@ class MemoryQueries:
             RETURN r
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def delete_relationship(relationship_type: str | None = None) -> tuple[LiteralString, dict[str, Any]]:
@@ -172,7 +172,7 @@ class MemoryQueries:
                 RETURN count(r) as deleted
                 """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def get_memory_by_id(labels: list[str]) -> tuple[LiteralString, dict[str, Any]]:
@@ -214,7 +214,7 @@ class MemoryQueries:
             SKIP $offset LIMIT $limit
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def detect_relationships() -> tuple[LiteralString, dict[str, Any]]:
@@ -231,7 +231,7 @@ class MemoryQueries:
             ORDER BY similarity DESC
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
 
 class DreamJobQueries:
@@ -258,7 +258,7 @@ class DreamJobQueries:
             RETURN count(m) as updated
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def evict_low_salience() -> tuple[LiteralString, dict[str, Any]]:
@@ -282,7 +282,7 @@ class DreamJobQueries:
             RETURN count(id) as evicted
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def find_unassigned_memories() -> tuple[LiteralString, dict[str, Any]]:
@@ -299,7 +299,7 @@ class DreamJobQueries:
             LIMIT 500
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def assign_topic() -> tuple[LiteralString, dict[str, Any]]:
@@ -315,7 +315,7 @@ class DreamJobQueries:
         # Use raw since we need parameter in SET
         query = """MATCH (m:Memory {id: $id}) SET m.topic_id = $topic_id"""
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def get_all_memories_for_clustering() -> tuple[LiteralString, dict[str, Any]]:
@@ -350,7 +350,7 @@ class VectorIndexQueries:
             RETURN options
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def drop_vector_index() -> tuple[LiteralString, dict[str, Any]]:
@@ -361,7 +361,7 @@ class VectorIndexQueries:
         """
         query = "DROP INDEX memory_embeddings IF EXISTS"
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def create_vector_index(dimensions: int) -> tuple[LiteralString, dict[str, Any]]:
@@ -382,7 +382,7 @@ class VectorIndexQueries:
             }}}}
             """
 
-        return query, {}
+        return cast(LiteralString, query), {}
 
 
 class QueryFactory:

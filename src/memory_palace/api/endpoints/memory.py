@@ -41,16 +41,33 @@ class StoreTurnRequest(BaseModel):
         description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number",
     )
 
-    @field_validator("salience")
+    @field_validator("salience", mode="before")
     @classmethod
     def validate_salience(cls, v):
-        if v is not None and not isinstance(v, int | float):
-            raise ValueError(
-                "Salience must be a number between 0.0 and 1.0. "
-                "Examples: 0.5 for normal, 0.8 for important. "
-                "Do not use strings like 'high' or 'very important'."
-            )
-        return v
+        # Handle string numbers from JSON/MCP tool conversion
+        if v is None:
+            return v
+        if isinstance(v, str):
+            # Convert string to float without try-except
+            # Let Pydantic handle the ValueError if it's not a valid number
+            return float(v)
+        if isinstance(v, int | float):
+            return v
+        # Raise structured error for invalid types
+        from memory_palace.core.base import ValidationErrorDetails
+        from memory_palace.core.errors import ProcessingError
+
+        raise ProcessingError(
+            message="Salience must be a number between 0.0 and 1.0",
+            details=ValidationErrorDetails(
+                source="memory_endpoint",
+                operation="validate_salience",
+                field="salience",
+                actual_value=str(v),
+                expected_type="float",
+                constraint="0.0 <= salience <= 1.0",
+            ),
+        )
 
 
 class StoreTurnResponse(BaseModel):

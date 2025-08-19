@@ -29,6 +29,7 @@ from memory_palace.domain.specifications.memory import (
     SalientMemorySpecification,
     TopicMemorySpecification,
 )
+from memory_palace.domain.specifications.similarity import SimilaritySpecification
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
 from memory_palace.services.memory_service import MemoryService
 
@@ -367,38 +368,51 @@ async def execute_unified_query(
         # Start with basic node match
         builder.match(lambda p: p.node(dsl.node_label, dsl.node_alias))
 
-        # Apply specification-based filters
+        # Build combined specification including similarity if needed
         specification_tree = None
+        specs_to_combine = []
+
+        # Add filter specifications
         if dsl.filters:
-            spec = build_specification(dsl.filters)
-            builder.where_spec(spec)
+            filter_spec = build_specification(dsl.filters)
+            specs_to_combine.append(filter_spec)
 
-            # Build specification tree for debug info
-            if request.debug:
-                specification_tree = {
-                    "type": type(spec).__name__,
-                    "cypher": spec.to_cypher() if hasattr(spec, "to_cypher") else None,
-                }
-
-        # Apply similarity search
+        # Add similarity specification if requested
+        similarity_spec = None
         if dsl.similarity:
             # Get embedding for the query
             query_embedding = await memory_service.embeddings.embed_text(dsl.similarity.query)
+
+            similarity_spec = SimilaritySpecification(
+                embedding=query_embedding, threshold=dsl.similarity.threshold, alias=dsl.node_alias
+            )
+            # We'll handle similarity separately due to its special requirements
             params["query_embedding"] = query_embedding
             params["similarity_threshold"] = dsl.similarity.threshold
 
-            # Add similarity calculation
+        # Apply non-similarity filters first
+        if specs_to_combine:
+            combined_spec = specs_to_combine[0]
+            for spec in specs_to_combine[1:]:
+                combined_spec = combined_spec.and_(spec)
+
+            builder.where_spec(combined_spec)
+
+            if request.debug:
+                specification_tree = {
+                    "type": type(combined_spec).__name__,
+                    "cypher": combined_spec.to_cypher() if hasattr(combined_spec, "to_cypher") else None,
+                }
+
+        # If we have similarity, add WITH clause for calculation then filter
+        if similarity_spec:
+            # Calculate similarity in WITH clause
             builder.with_clause(
                 f"{dsl.node_alias}",
-                f"""
-                reduce(dot = 0.0, i IN range(0, size({dsl.node_alias}.embedding)-1) | 
-                       dot + {dsl.node_alias}.embedding[i] * $query_embedding[i]) / 
-                (sqrt(reduce(sum = 0.0, i IN range(0, size({dsl.node_alias}.embedding)-1) | 
-                       sum + {dsl.node_alias}.embedding[i] * {dsl.node_alias}.embedding[i])) * 
-                 sqrt(reduce(sum = 0.0, i IN range(0, size($query_embedding)-1) | 
-                       sum + $query_embedding[i] * $query_embedding[i]))) AS similarity
-                """,
+                f"{similarity_spec.get_similarity_calculation()} AS similarity",
             )
+
+            # Filter by similarity threshold
             builder.where("similarity > $similarity_threshold")
 
         # Add relationship expansion if requested
@@ -408,7 +422,9 @@ async def execute_unified_query(
                 rel_types = "|".join(dsl.relationship_types)
                 rel_pattern = f":{rel_types}{rel_pattern}"
 
-            builder.optional_match(lambda p: p.node(dsl.node_alias).rel(rel_pattern).node(dsl.node_label, "related"))
+            builder.optional_match(
+                lambda p: p.node(variable=dsl.node_alias).rel(rel_pattern).node(dsl.node_label, "related")
+            )
 
             if dsl.include_relationships:
                 with_items = [f"{dsl.node_alias}", "COLLECT(DISTINCT related) AS relationships"]

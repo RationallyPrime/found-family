@@ -36,7 +36,7 @@ class GenericMemoryRepository(Generic[T]):
         # Use centralized query for MERGE
         query, _ = MemoryQueries.store_memory_merge(labels)
 
-        result = await self.session.run(cast(LiteralString, query), id=str(memory.id), properties=properties)
+        result = await self.session.run(query, id=str(memory.id), properties=properties)
 
         # Verify the memory was stored
         record = await result.single()
@@ -94,7 +94,7 @@ class GenericMemoryRepository(Generic[T]):
         # Use centralized query
         query, _ = MemoryQueries.get_memory_by_id(labels)
 
-        result = await self.session.run(cast(LiteralString, query), id=str(memory_id))
+        result = await self.session.run(query, id=str(memory_id))
         record = await result.single()
 
         if record:
@@ -109,9 +109,7 @@ class GenericMemoryRepository(Generic[T]):
         # Use centralized query with proper relationship type parameter
         query, _ = MemoryQueries.create_relationship(relationship_type)
 
-        await self.session.run(
-            cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id), properties=properties or {}
-        )
+        await self.session.run(query, source_id=str(source_id), target_id=str(target_id), properties=properties or {})
 
         logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
 
@@ -121,7 +119,7 @@ class GenericMemoryRepository(Generic[T]):
         # Use centralized query
         query, _ = MemoryQueries.delete_relationship(relationship_type)
 
-        result = await self.session.run(cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id))
+        result = await self.session.run(query, source_id=str(source_id), target_id=str(target_id))
 
         record = await result.single()
         deleted_count = record["deleted"] if record else 0
