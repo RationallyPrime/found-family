@@ -33,10 +33,8 @@ async def get_memory_service() -> AsyncGenerator[MemoryService]:
         service = MemoryService(
             session=session,
             embeddings=embedding_service,
+            clusterer=clustering_service,
         )
-        # Inject the global clustering service instead of creating a new one
-        service.clusterer = clustering_service
-        # No need to call initialize() since clusterer is already loaded
 
         try:
             yield service

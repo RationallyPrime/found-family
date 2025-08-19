@@ -46,11 +46,11 @@ logger = get_logger(__name__)
 class MemoryService:
     """Unified memory service with discriminated unions and advanced features."""
 
-    def __init__(self, session: AsyncSession, embeddings: EmbeddingService):
+    def __init__(self, session: AsyncSession, embeddings: EmbeddingService, clusterer: DBSCANClusteringService | None = None):
         self.session = session
         self.embeddings = embeddings
-        # Initialize clustering service (model will be loaded separately)
-        self.clusterer = DBSCANClusteringService()
+        # Accept clustering service as dependency, don't create a new one
+        self.clusterer = clusterer
 
         # Create typed repositories
         self.friend_repo = GenericMemoryRepository[FriendUtterance](session)
@@ -59,9 +59,6 @@ class MemoryService:
         self.memory_repo = MemoryRepository(session)
         self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
 
-    async def initialize(self) -> None:
-        """Initialize the service, loading models etc."""
-        await self.clusterer.load_model(self.session)
 
     async def run_query(self, query: str, **params):
         """Helper method to run queries with proper type casting.
