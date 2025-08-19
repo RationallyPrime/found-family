@@ -5,19 +5,21 @@ the ontology and relationships between memories.
 """
 
 from datetime import timedelta
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
+
+from pydantic import Field
 
 from memory_palace.domain.models.ontology import MemoryRole, RelationType
 from memory_palace.domain.models.utils import utc_now
-from memory_palace.domain.specifications.composite import BaseSpecification
+from memory_palace.domain.specifications.composite import BaseSpecification, CompositeSpecification
 
 
 class SalientMemorySpecification(BaseSpecification):
     """Find memories above a salience threshold."""
 
-    def __init__(self, min_salience: float = 0.5):
-        self.min_salience = min_salience
+    type: Literal["salience"] = "salience"
+    min_salience: float = Field(0.5, ge=0.0, le=1.0)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         return hasattr(entity, "salience") and entity.salience >= self.min_salience
@@ -33,8 +35,8 @@ class SalientMemorySpecification(BaseSpecification):
 class TopicMemorySpecification(BaseSpecification):
     """Find memories belonging to specific topics."""
 
-    def __init__(self, topic_ids: list[int] | int):
-        self.topic_ids = topic_ids if isinstance(topic_ids, list) else [topic_ids]
+    type: Literal["topic"] = "topic"
+    topic_ids: list[int] = Field(...)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         return hasattr(entity, "topic_id") and entity.topic_id in self.topic_ids
@@ -49,8 +51,8 @@ class TopicMemorySpecification(BaseSpecification):
 class ConversationMemorySpecification(BaseSpecification):
     """Find memories from a specific conversation."""
 
-    def __init__(self, conversation_id: UUID):
-        self.conversation_id = conversation_id
+    type: Literal["conversation"] = "conversation"
+    conversation_id: UUID = Field(...)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         return hasattr(entity, "conversation_id") and entity.conversation_id == self.conversation_id
@@ -65,8 +67,13 @@ class ConversationMemorySpecification(BaseSpecification):
 class RecentMemorySpecification(BaseSpecification):
     """Find memories within a time window."""
 
-    def __init__(self, days: int = 7, hours: int = 0):
-        self.cutoff = utc_now() - timedelta(days=days, hours=hours)
+    type: Literal["recency"] = "recency"
+    days: int = Field(7, ge=1)
+    hours: int = Field(0, ge=0)
+    
+    @property
+    def cutoff(self):
+        return utc_now() - timedelta(days=self.days, hours=self.hours)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         if not hasattr(entity, "timestamp"):
@@ -83,9 +90,14 @@ class RecentMemorySpecification(BaseSpecification):
 class EmotionalMemorySpecification(BaseSpecification):
     """Find memories with specific emotional characteristics."""
 
-    def __init__(self, min_intensity: float = 0.5, valence_range: tuple[float, float] = (-1.0, 1.0)):
-        self.min_intensity = min_intensity
-        self.valence_range = valence_range
+    type: Literal["emotional"] = "emotional"
+    min_intensity: float = Field(0.5, ge=0.0, le=1.0)
+    valence_min: float = Field(-1.0, ge=-1.0, le=1.0)
+    valence_max: float = Field(1.0, ge=-1.0, le=1.0)
+    
+    @property
+    def valence_range(self) -> tuple[float, float]:
+        return (self.valence_min, self.valence_max)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         if not hasattr(entity, "emotional_intensity") or not hasattr(entity, "emotional_valence"):
@@ -114,8 +126,8 @@ class EmotionalMemorySpecification(BaseSpecification):
 class OntologyPathSpecification(BaseSpecification):
     """Find memories in a specific ontology path."""
 
-    def __init__(self, path_prefix: list[str]):
-        self.path_prefix = path_prefix
+    type: Literal["ontology"] = "ontology"
+    path_prefix: list[str] = Field(...)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         if not hasattr(entity, "ontology_path"):
@@ -140,12 +152,10 @@ class OntologyPathSpecification(BaseSpecification):
 class RelatedMemorySpecification(BaseSpecification):
     """Find memories related to a source memory."""
 
-    def __init__(
-        self, source_id: UUID, relationship_types: list[RelationType] | None = None, min_strength: float = 0.0
-    ):
-        self.source_id = source_id
-        self.relationship_types = relationship_types
-        self.min_strength = min_strength
+    type: Literal["related"] = "related"
+    source_id: UUID = Field(...)
+    relationship_types: list[RelationType] | None = None
+    min_strength: float = Field(0.0, ge=0.0, le=1.0)
 
     def is_satisfied_by(self, entity: Any) -> bool:  # noqa: ARG002
         # This requires graph traversal, not simple property check
@@ -180,8 +190,8 @@ class RelatedMemorySpecification(BaseSpecification):
 class FrequentlyAccessedSpecification(BaseSpecification):
     """Find frequently accessed memories."""
 
-    def __init__(self, min_access_count: int = 5):
-        self.min_access_count = min_access_count
+    type: Literal["frequency"] = "frequency"
+    min_access_count: int = Field(5, ge=1)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         return hasattr(entity, "access_count") and entity.access_count >= self.min_access_count
@@ -196,6 +206,8 @@ class FrequentlyAccessedSpecification(BaseSpecification):
 class UserMemorySpecification(BaseSpecification):
     """Find memories from the user."""
 
+    type: Literal["user"] = "user"
+
     def is_satisfied_by(self, entity: Any) -> bool:
         return hasattr(entity, "role") and entity.role == MemoryRole.USER
 
@@ -208,6 +220,8 @@ class UserMemorySpecification(BaseSpecification):
 
 class AssistantMemorySpecification(BaseSpecification):
     """Find memories from the assistant."""
+
+    type: Literal["assistant"] = "assistant"
 
     def is_satisfied_by(self, entity: Any) -> bool:
         return hasattr(entity, "role") and entity.role == MemoryRole.ASSISTANT
@@ -222,8 +236,8 @@ class AssistantMemorySpecification(BaseSpecification):
 class ConceptMemorySpecification(BaseSpecification):
     """Find memories containing specific concepts."""
 
-    def __init__(self, concepts: list[str]):
-        self.concepts = concepts
+    type: Literal["concepts"] = "concepts"
+    concepts: list[str] = Field(...)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         if not hasattr(entity, "concepts"):
@@ -245,9 +259,13 @@ class ConceptMemorySpecification(BaseSpecification):
 class DecayingMemorySpecification(BaseSpecification):
     """Find memories that are decaying (haven't been accessed recently)."""
 
-    def __init__(self, days_since_access: int = 30, max_salience: float = 0.3):
-        self.cutoff = utc_now() - timedelta(days=days_since_access)
-        self.max_salience = max_salience
+    type: Literal["decay"] = "decay"
+    days_since_access: int = Field(30, ge=1)
+    max_salience: float = Field(0.3, ge=0.0, le=1.0)
+    
+    @property
+    def cutoff(self):
+        return utc_now() - timedelta(days=self.days_since_access)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         if not hasattr(entity, "last_accessed") or not hasattr(entity, "salience"):
@@ -267,3 +285,22 @@ class DecayingMemorySpecification(BaseSpecification):
     def to_cypher(self) -> str:
         return f"""(m.last_accessed IS NULL OR m.last_accessed < datetime('{self.cutoff.isoformat()}'))
         AND m.salience <= {self.max_salience}"""
+
+
+# Discriminated union of all specification types
+MemorySpecification = Annotated[
+    SalientMemorySpecification
+    | TopicMemorySpecification
+    | ConversationMemorySpecification
+    | RecentMemorySpecification
+    | EmotionalMemorySpecification
+    | OntologyPathSpecification
+    | RelatedMemorySpecification
+    | FrequentlyAccessedSpecification
+    | UserMemorySpecification
+    | AssistantMemorySpecification
+    | ConceptMemorySpecification
+    | DecayingMemorySpecification
+    | CompositeSpecification,
+    Field(discriminator="type"),
+]

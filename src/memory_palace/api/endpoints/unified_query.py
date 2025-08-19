@@ -9,7 +9,7 @@ This module provides a single, powerful endpoint for all query needs with:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +18,8 @@ from pydantic import BaseModel, Field
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.specifications.memory import (
+    MemorySpecification,  # Use the discriminated union directly
+    CompositeSpecification,
     ConceptMemorySpecification,
     ConversationMemorySpecification,
     DecayingMemorySpecification,
@@ -37,113 +39,6 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-class SpecificationFilter(BaseModel):
-    """Base specification filter."""
-
-    type: str = Field(..., description="Type of specification filter")
-
-
-class SalienceFilter(SpecificationFilter):
-    """Filter by memory salience/importance."""
-
-    type: Literal["salience"] = "salience"
-    min_salience: float = Field(0.5, ge=0.0, le=1.0)
-
-
-class TopicFilter(SpecificationFilter):
-    """Filter by topic IDs."""
-
-    type: Literal["topic"] = "topic"
-    topic_ids: list[int]
-
-
-class ConversationFilter(SpecificationFilter):
-    """Filter by conversation ID."""
-
-    type: Literal["conversation"] = "conversation"
-    conversation_id: UUID
-
-
-class RecencyFilter(SpecificationFilter):
-    """Filter by recency."""
-
-    type: Literal["recency"] = "recency"
-    days: int = Field(7, ge=1)
-    hours: int = Field(0, ge=0)
-
-
-class EmotionalFilter(SpecificationFilter):
-    """Filter by emotional characteristics."""
-
-    type: Literal["emotional"] = "emotional"
-    min_intensity: float = Field(0.5, ge=0.0, le=1.0)
-    valence_min: float = Field(-1.0, ge=-1.0, le=1.0)
-    valence_max: float = Field(1.0, ge=-1.0, le=1.0)
-
-
-class OntologyFilter(SpecificationFilter):
-    """Filter by ontology path."""
-
-    type: Literal["ontology"] = "ontology"
-    path_prefix: list[str]
-
-
-class ConceptFilter(SpecificationFilter):
-    """Filter by concepts."""
-
-    type: Literal["concepts"] = "concepts"
-    concepts: list[str]
-
-
-class FrequencyFilter(SpecificationFilter):
-    """Filter by access frequency."""
-
-    type: Literal["frequency"] = "frequency"
-    min_access_count: int = Field(5, ge=1)
-
-
-class DecayFilter(SpecificationFilter):
-    """Filter for decaying memories."""
-
-    type: Literal["decay"] = "decay"
-    days_since_access: int = Field(30, ge=1)
-    max_salience: float = Field(0.3, ge=0.0, le=1.0)
-
-
-class RelationshipFilter(SpecificationFilter):
-    """Filter by relationships to other memories."""
-
-    type: Literal["related"] = "related"
-    source_id: UUID
-    relationship_types: list[str] | None = None
-    min_strength: float = Field(0.0, ge=0.0, le=1.0)
-
-
-class CompositeFilter(BaseModel):
-    """Composite filter for combining specifications."""
-
-    type: Literal["composite"] = "composite"
-    operator: Literal["and", "or"]
-    filters: list[Any]  # Use Any to break circular reference, validate at runtime
-
-
-# Define the discriminated union using Annotated pattern
-FilterType = Annotated[
-    SalienceFilter
-    | TopicFilter
-    | ConversationFilter
-    | RecencyFilter
-    | EmotionalFilter
-    | OntologyFilter
-    | ConceptFilter
-    | FrequencyFilter
-    | DecayFilter
-    | RelationshipFilter
-    | CompositeFilter,
-    Field(discriminator="type"),
-]
-
-
 class SimilaritySearch(BaseModel):
     """Configuration for similarity search."""
 
@@ -160,7 +55,7 @@ class QueryDSL(BaseModel):
     node_alias: str = Field("m", description="Variable alias for the node")
 
     # Filtering via specifications
-    filters: FilterType | None = Field(None, description="Specification-based filters")
+    filters: MemorySpecification | None = Field(None, description="Specification-based filters")
 
     # Similarity search
     similarity: SimilaritySearch | None = Field(None, description="Similarity search configuration")
@@ -241,57 +136,16 @@ def parse_order_by(order_by_str: str) -> tuple[str | None, str, str] | None:
     return None
 
 
-def build_specification(filter_spec: FilterType | dict[str, Any]):
-    """Convert filter DSL to specification objects."""
-
-    # Handle dict representation (for nested filters in CompositeFilter)
-    if isinstance(filter_spec, dict):
-        filter_type = filter_spec.get("type")
-        # Remove 'type' from the dict before passing to constructors
-        filter_data = {k: v for k, v in filter_spec.items() if k != "type"}
-
-        from memory_palace.core.errors import ProcessingError
-        
-        if filter_type == "salience":
-            filter_spec = SalienceFilter(**filter_data)
-        elif filter_type == "topic":
-            filter_spec = TopicFilter(**filter_data)  # ty:ignore
-        elif filter_type == "conversation":
-            filter_spec = ConversationFilter(**filter_data)  # ty:ignore
-        elif filter_type == "recency":
-            filter_spec = RecencyFilter(**filter_data)
-        elif filter_type == "emotional":
-            filter_spec = EmotionalFilter(**filter_data)
-        elif filter_type == "ontology":
-            filter_spec = OntologyFilter(**filter_data)  # ty:ignore
-        elif filter_type == "concepts":
-            filter_spec = ConceptFilter(**filter_data)  # ty:ignore
-        elif filter_type == "frequency":
-            filter_spec = FrequencyFilter(**filter_data)
-        elif filter_type == "decay":
-            filter_spec = DecayFilter(**filter_data)
-        elif filter_type == "related":
-            filter_spec = RelationshipFilter(**filter_data)  # ty:ignore
-        elif filter_type == "composite":
-            filter_spec = CompositeFilter(**filter_data)  # ty:ignore
-        else:
-            raise ProcessingError(
-                message=f"Unknown filter type: {filter_type}",
-                details={
-                    "source": "unified_query",
-                    "operation": "build_specification",
-                    "field": "filter_type",
-                    "actual_value": filter_type,
-                    "expected_type": "FilterType",
-                    "constraint": "Must be one of: salience, topic, conversation, recency, emotional, ontology, concepts, frequency, decay, related, composite"
-                }
-            )
-
-    if isinstance(filter_spec, CompositeFilter):
+def build_specification(filter_spec: MemorySpecification):
+    """Build composite specifications if needed.
+    
+    Since specifications are already Pydantic models, we just need to handle
+    the CompositeSpecification case where we need to combine multiple specs.
+    """
+    if isinstance(filter_spec, CompositeSpecification):
         # Recursively build composite specifications
-        # Each filter in filters is either a dict or a FilterType
-        sub_specs = [build_specification(f) for f in filter_spec.filters]
-
+        sub_specs = [build_specification(spec) for spec in filter_spec.specifications]
+        
         if filter_spec.operator == "and":
             spec = sub_specs[0]
             for s in sub_specs[1:]:
@@ -302,48 +156,9 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
             for s in sub_specs[1:]:
                 spec = spec.or_(s)  # Use the or_ method
             return spec
-
-    # Map filter types to specification classes
-    if isinstance(filter_spec, SalienceFilter):
-        return SalientMemorySpecification(filter_spec.min_salience)
-
-    elif isinstance(filter_spec, TopicFilter):
-        return TopicMemorySpecification(filter_spec.topic_ids)
-
-    elif isinstance(filter_spec, ConversationFilter):
-        return ConversationMemorySpecification(filter_spec.conversation_id)
-
-    elif isinstance(filter_spec, RecencyFilter):
-        return RecentMemorySpecification(filter_spec.days, filter_spec.hours)
-
-    elif isinstance(filter_spec, EmotionalFilter):
-        return EmotionalMemorySpecification(
-            filter_spec.min_intensity, (filter_spec.valence_min, filter_spec.valence_max)
-        )
-
-    elif isinstance(filter_spec, OntologyFilter):
-        return OntologyPathSpecification(filter_spec.path_prefix)
-
-    elif isinstance(filter_spec, ConceptFilter):
-        return ConceptMemorySpecification(filter_spec.concepts)
-
-    elif isinstance(filter_spec, FrequencyFilter):
-        return FrequentlyAccessedSpecification(filter_spec.min_access_count)
-
-    elif isinstance(filter_spec, DecayFilter):
-        return DecayingMemorySpecification(filter_spec.days_since_access, filter_spec.max_salience)
-
-    elif isinstance(filter_spec, RelationshipFilter):
-        # Convert string relationship types to RelationType enum if needed
-        from memory_palace.domain.models.ontology import RelationType
-
-        rel_types = None
-        if filter_spec.relationship_types:
-            rel_types = [RelationType(rt) if isinstance(rt, str) else rt for rt in filter_spec.relationship_types]
-        return RelatedMemorySpecification(filter_spec.source_id, rel_types, filter_spec.min_strength)
-
-    else:
-        raise ValueError(f"Unknown filter type: {type(filter_spec)}")
+    
+    # For all other specifications, they're already ready to use
+    return filter_spec
 
 
 @router.post("/query", response_model=UnifiedQueryResponse, operation_id="query")

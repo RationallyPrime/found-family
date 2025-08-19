@@ -4,17 +4,21 @@ This module provides base classes for building composite specifications
 that can be extended for specific domain needs.
 """
 
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
+
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
 
-class BaseSpecification:
+class BaseSpecification(BaseModel):
     """Base class for concrete specifications.
 
     This provides default implementations of the composition methods
     so that concrete specifications only need to implement the core logic.
     """
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         """Check if the entity satisfies this specification."""
@@ -26,23 +30,23 @@ class BaseSpecification:
 
     def and_(self, other: "BaseSpecification") -> "BaseSpecification":
         """Combine with another specification using AND logic."""
-        return _AndSpecification(self, other)
+        return AndSpecification(left=self, right=other)
 
     def or_(self, other: "BaseSpecification") -> "BaseSpecification":
         """Combine with another specification using OR logic."""
-        return _OrSpecification(self, other)
+        return OrSpecification(left=self, right=other)
 
     def not_(self) -> "BaseSpecification":
         """Negate this specification."""
-        return _NotSpecification(self)
+        return NotSpecification(spec=self)
 
 
-class _AndSpecification(BaseSpecification):
-    """Internal AND specification implementation."""
+class AndSpecification(BaseSpecification):
+    """AND specification implementation."""
 
-    def __init__(self, left: BaseSpecification, right: BaseSpecification) -> None:
-        self.left = left
-        self.right = right
+    type: Literal["and"] = "and"
+    left: BaseSpecification
+    right: BaseSpecification
 
     def is_satisfied_by(self, entity: Any) -> bool:
         """Check if both specifications are satisfied."""
@@ -74,12 +78,12 @@ class _AndSpecification(BaseSpecification):
             return "true"
 
 
-class _OrSpecification(BaseSpecification):
-    """Internal OR specification implementation."""
+class OrSpecification(BaseSpecification):
+    """OR specification implementation."""
 
-    def __init__(self, left: BaseSpecification, right: BaseSpecification) -> None:
-        self.left = left
-        self.right = right
+    type: Literal["or"] = "or"
+    left: BaseSpecification
+    right: BaseSpecification
 
     def is_satisfied_by(self, entity: Any) -> bool:
         """Check if either specification is satisfied."""
@@ -106,11 +110,11 @@ class _OrSpecification(BaseSpecification):
             return "true"
 
 
-class _NotSpecification(BaseSpecification):
-    """Internal NOT specification implementation."""
+class NotSpecification(BaseSpecification):
+    """NOT specification implementation."""
 
-    def __init__(self, spec: BaseSpecification) -> None:
-        self.spec = spec
+    type: Literal["not"] = "not"
+    spec: BaseSpecification
 
     def is_satisfied_by(self, entity: Any) -> bool:
         """Check if the specification is NOT satisfied."""
@@ -124,17 +128,9 @@ class _NotSpecification(BaseSpecification):
 class AttributeSpecification(BaseSpecification):
     """Specification that checks an attribute value."""
 
-    def __init__(self, attribute: str, value: Any, operator: str = "eq") -> None:
-        """Initialize an attribute specification.
-
-        Args:
-            attribute: Name of the attribute to check
-            value: Value to compare against
-            operator: Comparison operator (eq, ne, gt, gte, lt, lte, in, contains)
-        """
-        self.attribute = attribute
-        self.value = value
-        self.operator = operator
+    attribute: str
+    value: Any
+    operator: str = "eq"  # Comparison operator (eq, ne, gt, gte, lt, lte, in, contains)
 
     def is_satisfied_by(self, entity: Any) -> bool:
         """Check if the entity's attribute satisfies the condition."""
@@ -192,3 +188,38 @@ class AlwaysFalseSpecification(BaseSpecification):
     def to_filter(self) -> dict[str, Any]:
         """Returns impossible filter."""
         return {"$impossible": True}
+
+
+class CompositeSpecification(BaseSpecification):
+    """Composite specification for combining multiple specifications."""
+    
+    type: Literal["composite"] = "composite"
+    operator: Literal["and", "or"] = Field(...)
+    specifications: list[BaseSpecification] = Field(...)
+    
+    def is_satisfied_by(self, entity: Any) -> bool:
+        if self.operator == "and":
+            return all(spec.is_satisfied_by(entity) for spec in self.specifications)
+        else:  # "or"
+            return any(spec.is_satisfied_by(entity) for spec in self.specifications)
+    
+    def to_cypher(self) -> str:
+        cypher_clauses = [spec.to_cypher() for spec in self.specifications if hasattr(spec, "to_cypher")]
+        if not cypher_clauses:
+            return "true"
+        
+        if self.operator == "and":
+            return " AND ".join(f"({clause})" for clause in cypher_clauses)
+        else:  # "or"
+            return " OR ".join(f"({clause})" for clause in cypher_clauses)
+    
+    def to_filter(self) -> dict[str, Any]:
+        filters = [spec.to_filter() for spec in self.specifications]
+        if self.operator == "and":
+            # Merge all filters
+            result = {}
+            for f in filters:
+                result.update(f)
+            return result
+        else:  # "or"
+            return {"$or": filters}
