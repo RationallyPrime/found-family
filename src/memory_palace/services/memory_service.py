@@ -206,7 +206,17 @@ class MemoryService:
 
         record = await result.single()
         if not record:
-            raise RuntimeError("Failed to create conversation turn")
+            from memory_palace.core.errors import ProcessingError
+            raise ProcessingError(
+                message="Failed to create conversation turn atomically",
+                details={
+                    "source": "memory_service",
+                    "operation": "remember_turn_atomic",
+                    "friend_id": friend_id,
+                    "claude_id": claude_id,
+                    "turn_id": turn_id
+                }
+            )
 
         # Convert records to memory objects
         friend_memory = FriendUtterance(
@@ -359,7 +369,23 @@ class MemoryService:
                     logger.debug(f"Stage 2: Boosted {len(topical)} memories from topic {topic_id}")
 
             except Exception as e:
-                logger.warning(f"Stage 2 ontology boost failed: {e}")
+                # Log ontology boost failure but continue - it's optional
+                from memory_palace.core.errors import ProcessingError
+                
+                # Create error for logging but don't raise (it's optional)
+                error = ProcessingError(
+                    message="Ontology boost failed during recall",
+                    details={
+                        "source": "memory_service",
+                        "operation": "recall_with_graph",
+                        "stage": "ontology_boost",
+                        "error_message": str(e)
+                    }
+                )
+                logger.warning(
+                    "Stage 2 ontology boost failed",
+                    extra={"error": str(error), "details": error.details}
+                )
 
         # Stage 3: Graph expansion (traverse relationships from top candidates)
         top_candidates = candidates[:10]  # Expand from best candidates only
@@ -545,11 +571,11 @@ class MemoryService:
         memories = []
         async for record in result:
             memory_data = dict(record["m"])
-            try:
-                memory = Memory.model_validate(memory_data)
-                memories.append(memory)
-            except Exception as e:
-                logger.warning(f"Failed to deserialize memory: {e}")
+            # Use Pydantic's validation - let ValidationError bubble up
+            # as it indicates a data integrity issue that should be addressed
+            
+            memory = Memory.model_validate(memory_data)
+            memories.append(memory)
 
         logger.info(f"Specification-based recall returned {len(memories)} memories")
         return memories

@@ -219,33 +219,42 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
         # Remove 'type' from the dict before passing to constructors
         filter_data = {k: v for k, v in filter_spec.items() if k != "type"}
 
-        try:
-            if filter_type == "salience":
-                filter_spec = SalienceFilter(**filter_data)
-            elif filter_type == "topic":
-                filter_spec = TopicFilter(**filter_data)  # ty:ignore
-            elif filter_type == "conversation":
-                filter_spec = ConversationFilter(**filter_data)  # ty:ignore
-            elif filter_type == "recency":
-                filter_spec = RecencyFilter(**filter_data)
-            elif filter_type == "emotional":
-                filter_spec = EmotionalFilter(**filter_data)
-            elif filter_type == "ontology":
-                filter_spec = OntologyFilter(**filter_data)  # ty:ignore
-            elif filter_type == "concepts":
-                filter_spec = ConceptFilter(**filter_data)  # ty:ignore
-            elif filter_type == "frequency":
-                filter_spec = FrequencyFilter(**filter_data)
-            elif filter_type == "decay":
-                filter_spec = DecayFilter(**filter_data)
-            elif filter_type == "related":
-                filter_spec = RelationshipFilter(**filter_data)  # ty:ignore
-            elif filter_type == "composite":
-                filter_spec = CompositeFilter(**filter_data)  # ty:ignore
-            else:
-                raise ValueError(f"Unknown filter type: {filter_type}")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid filter data for {filter_type}: {e}") from e
+        from memory_palace.core.errors import ProcessingError
+        
+        if filter_type == "salience":
+            filter_spec = SalienceFilter(**filter_data)
+        elif filter_type == "topic":
+            filter_spec = TopicFilter(**filter_data)  # ty:ignore
+        elif filter_type == "conversation":
+            filter_spec = ConversationFilter(**filter_data)  # ty:ignore
+        elif filter_type == "recency":
+            filter_spec = RecencyFilter(**filter_data)
+        elif filter_type == "emotional":
+            filter_spec = EmotionalFilter(**filter_data)
+        elif filter_type == "ontology":
+            filter_spec = OntologyFilter(**filter_data)  # ty:ignore
+        elif filter_type == "concepts":
+            filter_spec = ConceptFilter(**filter_data)  # ty:ignore
+        elif filter_type == "frequency":
+            filter_spec = FrequencyFilter(**filter_data)
+        elif filter_type == "decay":
+            filter_spec = DecayFilter(**filter_data)
+        elif filter_type == "related":
+            filter_spec = RelationshipFilter(**filter_data)  # ty:ignore
+        elif filter_type == "composite":
+            filter_spec = CompositeFilter(**filter_data)  # ty:ignore
+        else:
+            raise ProcessingError(
+                message=f"Unknown filter type: {filter_type}",
+                details={
+                    "source": "unified_query",
+                    "operation": "build_specification",
+                    "field": "filter_type",
+                    "actual_value": filter_type,
+                    "expected_type": "FilterType",
+                    "constraint": "Must be one of: salience, topic, conversation, recency, emotional, ontology, concepts, frequency, decay, related, composite"
+                }
+            )
 
     if isinstance(filter_spec, CompositeFilter):
         # Recursively build composite specifications
@@ -309,7 +318,7 @@ def build_specification(filter_spec: FilterType | dict[str, Any]):
 @router.post("/query", response_model=UnifiedQueryResponse, operation_id="query")
 async def execute_unified_query(
     request: UnifiedQueryRequest,
-    memory_service: MemoryService = Depends(get_memory_service),
+    memory_service: MemoryService = Depends(get_memory_service),  # noqa: B008
 ) -> UnifiedQueryResponse:
     """Execute a unified query using the declarative DSL.
 
@@ -498,6 +507,24 @@ async def execute_unified_query(
 
         return response
 
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.error("Failed to execute unified query", exc_info=True, extra={"error": str(e)})
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        from memory_palace.core.base import ServiceErrorDetails
+        from memory_palace.core.errors import ProcessingError
+        
+        logger.error("Failed to execute unified query", exc_info=True)
+        
+        # Convert to ProcessingError for proper error handling
+        error = ProcessingError(
+            message=f"Failed to execute unified query: {e}",
+            details=ServiceErrorDetails(
+                source="unified_query",
+                operation="execute_unified_query",
+                service_name="memory_palace",
+                endpoint="/api/v1/unified_query",
+                status_code=500
+            )
+        )
+        raise HTTPException(status_code=500, detail=str(error)) from e

@@ -123,8 +123,20 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield  # Application is running
 
     except Exception as e:
-        logger.error(f"❌ Failed to start Memory Palace: {e}", exc_info=True)
-        raise
+        from memory_palace.core.errors import ServiceError
+        from memory_palace.core.base import ServiceErrorDetails
+        
+        logger.error("❌ Failed to start Memory Palace", exc_info=True)
+        raise ServiceError(
+            message=f"Failed to start Memory Palace application: {e}",
+            details=ServiceErrorDetails(
+                source="main",
+                operation="lifespan_startup",
+                service_name="memory_palace",
+                endpoint="/",
+                status_code=500
+            )
+        ) from e
 
     finally:
         # Shutdown sequence

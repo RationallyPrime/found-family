@@ -54,19 +54,18 @@ class StoreTurnRequest(BaseModel):
         if isinstance(v, int | float):
             return v
         # Raise structured error for invalid types
-        from memory_palace.core.base import ValidationErrorDetails
         from memory_palace.core.errors import ProcessingError
 
         raise ProcessingError(
             message="Salience must be a number between 0.0 and 1.0",
-            details=ValidationErrorDetails(
-                source="memory_endpoint",
-                operation="validate_salience",
-                field="salience",
-                actual_value=str(v),
-                expected_type="float",
-                constraint="0.0 <= salience <= 1.0",
-            ),
+            details={
+                "source": "memory_endpoint",
+                "operation": "validate_salience",
+                "field": "salience",
+                "actual_value": str(v),
+                "expected_type": "float",
+                "constraint": "0.0 <= salience <= 1.0",
+            }
         )
 
 

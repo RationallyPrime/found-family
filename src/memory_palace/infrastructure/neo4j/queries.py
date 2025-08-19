@@ -53,8 +53,9 @@ class MemoryQueries:
 
         query = " ".join(query_parts)
 
-        # Return query with parameter placeholders
-        return cast(LiteralString, query), {}
+        # Return query with parameter placeholders  
+        # Query is already LiteralString, no cast needed
+        return query, {}
 
     @staticmethod
     def store_memory_merge(labels: list[str]) -> tuple[LiteralString, dict[str, Any]]:

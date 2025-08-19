@@ -101,6 +101,46 @@ class MemoryRelationship(GraphModel):
 
     def __str__(self) -> str:
         return f"MemoryRelationship({self.relationship_type}, strength={self.strength})"
+    
+    def to_neo4j_properties(self) -> dict:
+        """Convert to Neo4j-compatible property dict, flattening metadata."""
+        # Get base properties from parent
+        props = super().to_neo4j_properties()
+        
+        # Flatten metadata into top-level properties with prefix
+        if "metadata" in props and props["metadata"]:
+            metadata = props.pop("metadata")
+            for key, value in metadata.items():
+                # Add metadata_ prefix to avoid collisions
+                props[f"metadata_{key}"] = value
+        
+        return props
+    
+    @classmethod
+    def from_neo4j_record(cls, record: dict) -> "MemoryRelationship":
+        """Reconstruct from Neo4j record, unflattening metadata."""
+        # Make a copy to avoid modifying the original
+        data = dict(record)
+        
+        # Reconstruct metadata from prefixed properties
+        metadata = {}
+        keys_to_remove = []
+        for key, value in data.items():
+            if key.startswith("metadata_"):
+                metadata_key = key[9:]  # Remove "metadata_" prefix
+                metadata[metadata_key] = value
+                keys_to_remove.append(key)
+        
+        # Remove the prefixed keys
+        for key in keys_to_remove:
+            del data[key]
+        
+        # Add metadata back if we found any
+        if metadata:
+            data["metadata"] = metadata
+        
+        # Use parent's from_neo4j_record for standard conversions
+        return super().from_neo4j_record(data)
 
 
 # The discriminated union - Pydantic will automatically route based on memory_type

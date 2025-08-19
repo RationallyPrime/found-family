@@ -41,7 +41,16 @@ class GenericMemoryRepository(Generic[T]):
         # Verify the memory was stored
         record = await result.single()
         if not record:
-            raise RuntimeError(f"Failed to store memory {memory.id}")
+            from memory_palace.core.errors import ProcessingError
+            raise ProcessingError(
+                message="Failed to store memory in database",
+                details={
+                    "source": "memory_repository",
+                    "operation": "store_memory",
+                    "memory_id": str(memory.id),
+                    "memory_type": memory.__class__.__name__
+                }
+            )
 
         logger.debug(f"Successfully stored memory {memory.id}")
         return memory
@@ -76,12 +85,10 @@ class GenericMemoryRepository(Generic[T]):
 
         memories = []
         async for record in result:
-            try:
-                memory = self._record_to_memory(record["m"], memory_type)
-                memories.append(memory)
-            except Exception as e:
-                logger.warning(f"Failed to deserialize memory record: {e}")
-                continue
+            # Let _record_to_memory handle errors with proper error handling
+            # It will raise ProcessingError if it fails
+            memory = self._record_to_memory(record["m"], memory_type)
+            memories.append(memory)
 
         logger.debug(f"Recalled {len(memories)} memories of type {memory_type.__name__}")
         return memories
@@ -166,12 +173,24 @@ class GenericMemoryRepository(Generic[T]):
 
     def _record_to_memory(self, record: dict, memory_type: type[T]) -> T:
         """Convert Neo4j record to memory object."""
+        from memory_palace.core.errors import ProcessingError
+        
         try:
             return memory_type.from_neo4j_record(record)
         except Exception as e:
-            logger.error(f"Failed to convert record to {memory_type.__name__}: {e}")
+            logger.error(f"Failed to convert record to {memory_type.__name__}", exc_info=True)
             logger.debug(f"Problematic record: {record}")
-            raise
+            raise ProcessingError(
+                message=f"Failed to deserialize {memory_type.__name__} from Neo4j record: {e}",
+                details={
+                    "source": "memory_repository",
+                    "operation": "_record_to_memory",
+                    "field": "record",
+                    "actual_value": str(record)[:200],  # Truncate for readability
+                    "expected_type": memory_type.__name__,
+                    "constraint": f"Must be valid {memory_type.__name__} record"
+                }
+            ) from e
 
 
 class MemoryRepository(GenericMemoryRepository[Memory]):
@@ -210,25 +229,43 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
 
             memories = []
             async for record in result:
-                try:
-                    # Use the discriminated union to automatically determine type
-                    memory_data = record["m"]
-                    if "memory_type" in memory_data:
-                        # Use TypeAdapter for discriminated union parsing
-                        from pydantic import TypeAdapter
+                # Use the discriminated union to automatically determine type
+                memory_data = record["m"]
+                if "memory_type" in memory_data:
+                    # Use TypeAdapter for discriminated union parsing
+                    from pydantic import TypeAdapter
 
-                        from memory_palace.domain.models.memories import Memory
-
-                        adapter = TypeAdapter(Memory)
-                        memory = adapter.validate_python(memory_data)
-                        memories.append(memory)
-                except Exception as e:
-                    logger.warning(f"Failed to deserialize memory record: {e}")
-                    continue
+                    from memory_palace.domain.models.memories import Memory
+                    
+                    adapter = TypeAdapter(Memory)
+                    # Use Pydantic's validation which will raise ValidationError
+                    # We'll let those bubble up as they indicate data integrity issues
+                    memory = adapter.validate_python(memory_data)
+                    memories.append(memory)
+                else:
+                    # Log missing memory_type as a warning
+                    logger.warning(
+                        "Memory record missing memory_type field",
+                        extra={"record_id": memory_data.get("id")}
+                    )
 
             logger.debug(f"Recalled {len(memories)} memories of mixed types")
             return memories
 
         except Exception as e:
-            logger.error(f"Failed to recall mixed memory types: {e}")
-            return []
+            from memory_palace.core.base import DatabaseErrorDetails
+            from memory_palace.core.errors import ProcessingError
+            
+            logger.error("Failed to recall mixed memory types", exc_info=True)
+            raise ProcessingError(
+                message=f"Failed to recall memories from database: {e}",
+                details=DatabaseErrorDetails(
+                    source="memory_repository",
+                    operation="recall_any",
+                    service_name="neo4j",
+                    endpoint="bolt://localhost:7687",
+                    status_code=500,
+                    query_type="recall",
+                    table="Memory"
+                )
+            ) from e
