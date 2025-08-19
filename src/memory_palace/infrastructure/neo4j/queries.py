@@ -234,6 +234,26 @@ class MemoryQueries:
 
         return cast(LiteralString, query), {}
 
+    @staticmethod
+    def get_relationship_edges() -> tuple[LiteralString, dict[str, Any]]:
+        """Get all relationship edges for a specific memory.
+        
+        Returns relationships as edges from the graph, not as nodes.
+        
+        Returns:
+            Tuple of (query, params)
+        """
+        query = """
+            MATCH (m:Memory {id: $memory_id})-[r]-(other:Memory)
+            RETURN type(r) as relationship_type, 
+                   r.strength as strength,
+                   r.auto_detected as auto_detected,
+                   other.id as other_id,
+                   CASE WHEN startNode(r) = m THEN 'outgoing' ELSE 'incoming' END as direction
+            """
+        
+        return cast(LiteralString, query), {}
+
 
 class DreamJobQueries:
     """All dream job/maintenance queries in one place."""

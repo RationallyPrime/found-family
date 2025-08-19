@@ -150,10 +150,11 @@ Memory = Annotated[
     | SystemNote
     | ConversationTurn
     | TopicCluster
-    | OntologyNode
-    | MemoryRelationship,
+    | OntologyNode,
     Field(discriminator="memory_type"),
 ]
+
+# MemoryRelationship is not part of Memory union - relationships are edges, not nodes
 
 # Type aliases for convenience
 Turn = tuple[FriendUtterance, ClaudeUtterance]

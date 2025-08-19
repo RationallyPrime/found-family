@@ -22,7 +22,7 @@ from memory_palace.domain.models.memories import (
     ClaudeUtterance,
     FriendUtterance,
     Memory,
-    MemoryRelationship,
+    MemoryRelationship,  # Used for return types only - not stored as nodes
     Turn,
 )
 from memory_palace.infrastructure.neo4j.queries import (
@@ -57,7 +57,7 @@ class MemoryService:
         self.claude_repo = GenericMemoryRepository[ClaudeUtterance](session)
         # Use the specialized MemoryRepository for the discriminated union
         self.memory_repo = MemoryRepository(session)
-        self.relationship_repo = GenericMemoryRepository[MemoryRelationship](session)
+        # No relationship_repo needed - relationships are edges, not nodes
 
 
     async def run_query(self, query: str, **params):
@@ -267,7 +267,7 @@ class MemoryService:
                 memory.id, other_id, rel_type, {"strength": similarity, "auto_detected": True}
             )
 
-            # Store relationship metadata as a node (for advanced querying)
+            # Create relationship object for return value (but don't store as node)
             relationship = MemoryRelationship(
                 source_id=memory.id,
                 target_id=other_id,
@@ -275,9 +275,7 @@ class MemoryService:
                 strength=similarity,
                 metadata={"detection_method": "vector_index"},
             )
-
-            # Note: Neo4j can't store nested objects, so metadata is flattened in the repository
-            await self.relationship_repo.remember(relationship)
+            # Relationships are edges, not nodes - they were already created with connect()
             relationships.append(relationship)
 
             logger.debug(f"Created {rel_type} relationship: {memory.id} -> {other_id} (strength={similarity:.3f})")
@@ -582,14 +580,26 @@ class MemoryService:
         return await self.memory_repo.recall_any(filters={"conversation_id": str(conversation_id)}, limit=limit)
 
     @error_context(error_level=ErrorLevel.INFO)
-    async def get_memory_relationships(self, memory_id: UUID) -> list[MemoryRelationship]:
-        """Get all relationships for a specific memory."""
-        # Get both outgoing and incoming relationships
-        outgoing = await self.relationship_repo.recall(MemoryRelationship, filters={"source_id": str(memory_id)})
-
-        incoming = await self.relationship_repo.recall(MemoryRelationship, filters={"target_id": str(memory_id)})
-
-        return outgoing + incoming
+    async def get_memory_relationships(self, memory_id: UUID) -> list[dict]:
+        """Get all relationships for a specific memory.
+        
+        Returns relationship edges from the graph, not nodes.
+        """
+        # Use centralized query from MemoryQueries
+        query, _ = MemoryQueries.get_relationship_edges()
+        
+        result = await self.run_query(query, memory_id=str(memory_id))
+        relationships = []
+        async for record in result:
+            relationships.append({
+                "relationship_type": record["relationship_type"],
+                "strength": record["strength"],
+                "auto_detected": record["auto_detected"],
+                "other_id": record["other_id"],
+                "direction": record["direction"]
+            })
+        
+        return relationships
 
     async def get_topic_memories(self, topic_id: int, limit: int = 50) -> list[Memory]:
         """Get all memories belonging to a specific topic cluster."""

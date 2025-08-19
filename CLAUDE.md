@@ -190,6 +190,62 @@ sudo systemctl start cloudflared-memory-palace
 ./run-prod.sh
 ```
 
+## Query Architecture Rules - CRITICAL
+
+**NEVER WRITE RAW CYPHER IN SERVICE LAYER!** All database queries must follow these strict rules:
+
+### Layer Responsibilities
+
+1. **Service Layer** (`services/*.py`):
+   - Business logic ONLY
+   - NEVER contains raw Cypher queries
+   - Calls repository methods or uses centralized queries
+   - Uses `run_query()` helper with queries from infrastructure layer
+
+2. **Repository Layer** (`infrastructure/repositories/*.py`):
+   - Orchestrates database access
+   - Uses centralized queries from `queries.py`
+   - Uses query builder for dynamic queries
+   - NEVER writes inline Cypher strings
+
+3. **Infrastructure Layer** (`infrastructure/neo4j/*.py`):
+   - `queries.py`: SINGLE SOURCE OF TRUTH for all Cypher queries
+   - `query_builder.py`: Dynamic query construction
+   - `filter_compiler.py`: Filter to Cypher compilation
+   - ALL Cypher lives here, nowhere else
+
+### Query Patterns
+
+**CORRECT - Using centralized queries:**
+```python
+# In service layer
+from memory_palace.infrastructure.neo4j.queries import MemoryQueries
+
+query, _ = MemoryQueries.get_relationship_edges()
+result = await self.run_query(query, memory_id=str(memory_id))
+```
+
+**WRONG - Raw Cypher in service:**
+```python
+# NEVER do this in service layer!
+query = """
+    MATCH (m:Memory {id: $memory_id})
+    RETURN m
+"""
+result = await self.run_query(query, memory_id=str(memory_id))
+```
+
+### Adding New Queries
+
+1. Add query method to appropriate class in `queries.py`:
+   - `MemoryQueries`: Memory operations
+   - `DreamJobQueries`: Background maintenance
+   - `VectorIndexQueries`: Index management
+
+2. Use `CypherQueryBuilder` for dynamic queries
+3. Return `tuple[LiteralString, dict[str, Any]]`
+4. Cast complex queries with `cast(LiteralString, query)`
+
 ## Error Handling Architecture - CRITICAL
 
 **DO NOT USE TRY-EXCEPT BLOCKS!** The codebase has a sophisticated error handling system that must be used instead.
