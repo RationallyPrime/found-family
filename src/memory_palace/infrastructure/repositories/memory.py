@@ -106,10 +106,8 @@ class GenericMemoryRepository(Generic[T]):
         self, source_id: UUID, target_id: UUID, relationship_type: str, properties: dict[str, Any] | None = None
     ):
         """Create a relationship between two memories."""
-        # Use centralized query - note: we need to handle relationship type injection
-        # For now, use the base query and replace the relationship type
-        base_query, _ = MemoryQueries.create_relationship()
-        query = base_query.replace(":RELATES_TO]", f":`{relationship_type}`]")
+        # Use centralized query with proper relationship type parameter
+        query, _ = MemoryQueries.create_relationship(relationship_type)
 
         await self.session.run(
             cast(LiteralString, query), source_id=str(source_id), target_id=str(target_id), properties=properties or {}

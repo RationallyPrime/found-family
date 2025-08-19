@@ -25,7 +25,6 @@ from memory_palace.domain.models.memories import (
     MemoryRelationship,
     Turn,
 )
-from memory_palace.infrastructure.embeddings.factory import validate_embedding_service
 from memory_palace.infrastructure.neo4j.queries import (
     MemoryQueries,
 )
@@ -48,9 +47,6 @@ class MemoryService:
     """Unified memory service with discriminated unions and advanced features."""
 
     def __init__(self, session: AsyncSession, embeddings: EmbeddingService):
-        # Validate embedding service before using it
-        validate_embedding_service(embeddings)
-
         self.session = session
         self.embeddings = embeddings
         # Initialize clustering service (model will be loaded separately)

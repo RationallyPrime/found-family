@@ -2,24 +2,6 @@
 ## 🚨 DUPLICATION & SCATTER MAP
 
 
-### 2. **Embedding Service Initialization** (3 locations)
-
-#### Created differently in:
-1. `src/memory_palace/main.py` lines 81-86:
-   ```python
-   embedding_cache = EmbeddingCache(neo4j_driver)
-   embedding_service = VoyageEmbeddingService(cache=embedding_cache)
-   ```
-
-2. `src/memory_palace/api/dependencies.py` lines 24-44:
-   ```python
-   # Just references global from main.py
-   ```
-
-3. `src/memory_palace/services/memory_service.py` lines 71-72:
-   ```python
-   # Expects it passed in, but no validation
-   ```
 
 ### 3. **Clustering Service Lifecycle** (4 different patterns)
 
@@ -53,13 +35,6 @@
 3. `memory.py` lines 62-74: Yet another similarity query
 4. `query_builder/helpers.py` lines 66-81: `with_similarity()` helper (unused!)
 
-### 7. **Error Handling Patterns** (Inconsistent)
-
-#### Different approaches:
-- `memory_service.py`: Uses `@with_error_handling` decorator
-- `dream_jobs.py`: Manual try/except with basic logging
-- `repositories/memory.py`: Mix of both patterns
-- `voyage.py`: Complex custom error mapping (lines 226-273)
 
 ### 8. **Relationship Creation** (3 different methods)
 

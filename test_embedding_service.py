@@ -8,8 +8,8 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
-from memory_palace.core.logging import setup_logging, get_logger
 
 setup_logging()
 logger = get_logger(__name__)

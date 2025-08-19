@@ -129,17 +129,20 @@ class MemoryQueries:
         return query, {}
 
     @staticmethod
-    def create_relationship() -> tuple[LiteralString, dict[str, Any]]:
+    def create_relationship(relationship_type: str = "RELATES_TO") -> tuple[LiteralString, dict[str, Any]]:
         """Create a relationship between two memories.
+
+        Args:
+            relationship_type: Type of relationship to create (default: RELATES_TO)
 
         Returns:
             Tuple of (query, params)
         """
-        # Note: relationship type will be injected at runtime
-        query = """
-            MATCH (source:Memory {id: $source_id})
-            MATCH (target:Memory {id: $target_id})
-            MERGE (source)-[r:RELATES_TO]->(target)
+        # Build query with the specific relationship type
+        query = f"""
+            MATCH (source:Memory {{id: $source_id}})
+            MATCH (target:Memory {{id: $target_id}})
+            MERGE (source)-[r:`{relationship_type}`]->(target)
             SET r += $properties
             RETURN r
             """
