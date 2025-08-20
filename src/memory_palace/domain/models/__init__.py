@@ -11,7 +11,6 @@ from .analysis import (
 from .conversation import (
     ContentType,
     Conversation,
-    ConversationTurn,
     Message,
     MessageRole,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "AnalysisType",
     "ContentType",
     "Conversation",
-    "ConversationTurn",
     # Embedding
     "EmbeddingType",
     "Entity",

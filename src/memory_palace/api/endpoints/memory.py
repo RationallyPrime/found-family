@@ -15,11 +15,11 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-class StoreTurnRequest(BaseModel):
-    """Request model for storing a conversation turn."""
+class StoreMemoryRequest(BaseModel):
+    """Request model for storing a single memory."""
 
-    user_content: str
-    assistant_content: str
+    content: str
+    role: str = Field(..., pattern="^(user|assistant)$", description="Role: 'user' or 'assistant'")
     conversation_id: UUID | None = None
     metadata: dict | None = None
 
@@ -65,15 +65,31 @@ class StoreTurnRequest(BaseModel):
                 "actual_value": str(v),
                 "expected_type": "float",
                 "constraint": "0.0 <= salience <= 1.0",
-            }
+            },
         )
 
 
-class StoreTurnResponse(BaseModel):
-    """Response model for storing a turn."""
+class StoreBatchRequest(BaseModel):
+    """Request model for storing multiple memories."""
 
-    turn_id: UUID
-    message: str = "Turn stored successfully"
+    memories: list[StoreMemoryRequest]
+    create_temporal_links: bool = Field(
+        default=False, description="Whether to create PRECEDES relationships between consecutive memories"
+    )
+
+
+class StoreMemoryResponse(BaseModel):
+    """Response model for storing a memory."""
+
+    memory_id: UUID
+    message: str = "Memory stored successfully"
+
+
+class StoreBatchResponse(BaseModel):
+    """Response model for storing multiple memories."""
+
+    memory_ids: list[UUID]
+    message: str = "Memories stored successfully"
 
 
 class SearchRequest(BaseModel):
@@ -96,32 +112,69 @@ class SearchResponse(BaseModel):
     count: int
 
 
-@router.post("/remember", response_model=StoreTurnResponse, operation_id="remember")
+@router.post("/remember", response_model=StoreMemoryResponse, operation_id="remember")
 @with_error_handling(reraise=True)
-async def remember_turn(
-    request: StoreTurnRequest,
+async def remember_message(
+    request: StoreMemoryRequest,
     memory_service: MemoryService = Depends(get_memory_service),
-) -> StoreTurnResponse:
-    """Store a conversation turn in memory."""
+) -> StoreMemoryResponse:
+    """Store a single memory."""
     logger.info(
-        "Storing conversation turn",
+        "Storing memory",
         extra={
-            "user_content_length": len(request.user_content),
-            "assistant_content_length": len(request.assistant_content),
+            "content_length": len(request.content),
+            "role": request.role,
             "conversation_id": str(request.conversation_id) if request.conversation_id else None,
         },
     )
 
-    user_memory, assistant_memory = await memory_service.remember_turn(
-        user_content=request.user_content,
-        assistant_content=request.assistant_content,
+    memory = await memory_service.remember_message(
+        content=request.content,
+        role=request.role,
         conversation_id=request.conversation_id,
         salience=request.salience,  # Pass through the importance rating
+        ontology_path=request.ontology_path,
+        metadata=request.metadata,
     )
 
-    # Use the assistant memory ID as the turn ID since that's the "response" part
-    logger.info("Successfully stored turn", extra={"turn_id": str(assistant_memory.id)})
-    return StoreTurnResponse(turn_id=assistant_memory.id)
+    logger.info("Successfully stored memory", extra={"memory_id": str(memory.id)})
+    return StoreMemoryResponse(memory_id=memory.id)
+
+
+@router.post("/remember/batch", response_model=StoreBatchResponse, operation_id="remember_batch")
+@with_error_handling(reraise=True)
+async def remember_batch(
+    request: StoreBatchRequest,
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> StoreBatchResponse:
+    """Store multiple memories at once."""
+    logger.info(
+        "Storing batch of memories",
+        extra={
+            "count": len(request.memories),
+        },
+    )
+
+    memory_ids = []
+    for idx, mem_request in enumerate(request.memories):
+        memory = await memory_service.remember_message(
+            content=mem_request.content,
+            role=mem_request.role,
+            conversation_id=mem_request.conversation_id,
+            salience=mem_request.salience,
+            ontology_path=mem_request.ontology_path,
+            metadata=mem_request.metadata,
+        )
+        memory_ids.append(memory.id)
+
+        # Optionally create PRECEDES relationship between consecutive memories
+        if request.create_temporal_links and idx > 0:
+            await memory_service.create_relationship(
+                source_id=memory_ids[idx - 1], target_id=memory.id, relationship_type="PRECEDES"
+            )
+
+    logger.info("Successfully stored batch", extra={"count": len(memory_ids)})
+    return StoreBatchResponse(memory_ids=memory_ids)
 
 
 @router.post("/recall", response_model=SearchResponse, operation_id="recall")

@@ -70,7 +70,7 @@ class RecentMemorySpecification(BaseSpecification):
     type: Literal["recency"] = "recency"
     days: int = Field(7, ge=1)
     hours: int = Field(0, ge=0)
-    
+
     @property
     def cutoff(self):
         return utc_now() - timedelta(days=self.days, hours=self.hours)
@@ -94,7 +94,7 @@ class EmotionalMemorySpecification(BaseSpecification):
     min_intensity: float = Field(0.5, ge=0.0, le=1.0)
     valence_min: float = Field(-1.0, ge=-1.0, le=1.0)
     valence_max: float = Field(1.0, ge=-1.0, le=1.0)
-    
+
     @property
     def valence_range(self) -> tuple[float, float]:
         return (self.valence_min, self.valence_max)
@@ -262,7 +262,7 @@ class DecayingMemorySpecification(BaseSpecification):
     type: Literal["decay"] = "decay"
     days_since_access: int = Field(30, ge=1)
     max_salience: float = Field(0.3, ge=0.0, le=1.0)
-    
+
     @property
     def cutoff(self):
         return utc_now() - timedelta(days=self.days_since_access)

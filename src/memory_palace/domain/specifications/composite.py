@@ -17,7 +17,7 @@ class BaseSpecification(BaseModel):
     This provides default implementations of the composition methods
     so that concrete specifications only need to implement the core logic.
     """
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def is_satisfied_by(self, entity: Any) -> bool:
@@ -192,27 +192,27 @@ class AlwaysFalseSpecification(BaseSpecification):
 
 class CompositeSpecification(BaseSpecification):
     """Composite specification for combining multiple specifications."""
-    
+
     type: Literal["composite"] = "composite"
     operator: Literal["and", "or"] = Field(...)
     specifications: list[BaseSpecification] = Field(...)
-    
+
     def is_satisfied_by(self, entity: Any) -> bool:
         if self.operator == "and":
             return all(spec.is_satisfied_by(entity) for spec in self.specifications)
         else:  # "or"
             return any(spec.is_satisfied_by(entity) for spec in self.specifications)
-    
+
     def to_cypher(self) -> str:
         cypher_clauses = [spec.to_cypher() for spec in self.specifications if hasattr(spec, "to_cypher")]
         if not cypher_clauses:
             return "true"
-        
+
         if self.operator == "and":
             return " AND ".join(f"({clause})" for clause in cypher_clauses)
         else:  # "or"
             return " OR ".join(f"({clause})" for clause in cypher_clauses)
-    
+
     def to_filter(self) -> dict[str, Any]:
         filters = [spec.to_filter() for spec in self.specifications]
         if self.operator == "and":

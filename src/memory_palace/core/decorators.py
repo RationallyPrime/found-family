@@ -258,3 +258,56 @@ def handle_error(
             return sync_wrapper
 
     return decorator
+
+
+def with_session(driver_attr: str = "driver") -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Decorator to automatically manage Neo4j session lifecycle.
+
+    Eliminates duplicated session management code by automatically wrapping
+    methods with async session context management.
+
+    Args:
+        driver_attr: Name of the attribute containing the AsyncDriver (default: "driver")
+
+    Usage:
+        @with_session()
+        async def my_method(self, session, other_args):
+            # session is automatically injected as first parameter after self
+            result = await session.run(query)
+
+    Example:
+        Before:
+            async def refresh_salience(self):
+                async with self.driver.session() as session:
+                    result = await session.run(query, params)
+
+        After:
+            @with_session()
+            async def refresh_salience(self, session):
+                result = await session.run(query, params)
+    """
+
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
+        @wraps(func)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            # Extract self (first argument)
+            if not args:
+                raise ValueError(f"{func.__name__} requires at least 'self' argument")
+
+            self_obj = args[0]
+            driver = getattr(self_obj, driver_attr, None)
+
+            if driver is None:
+                raise AttributeError(
+                    f"Object {self_obj.__class__.__name__} has no attribute '{driver_attr}'. "
+                    f"Either provide the correct driver_attr or ensure the object has a driver."
+                )
+
+            # Create session and inject as second argument (after self)
+            async with driver.session() as session:
+                new_args = (args[0], session) + args[1:]
+                return await func(*new_args, **kwargs)  # ty: ignore
+
+        return cast(Callable[P, T], wrapper)
+
+    return decorator

@@ -87,6 +87,8 @@ async def get_cache_stats(driver: AsyncDriver = Depends(get_neo4j_driver)):
             """
         )
         record = await result.single()
+        if record is None:
+            return {"size": 0, "total_hits": 0}
         return {
             "size": record.get("size", 0),
             "total_hits": record.get("total_hits", 0),

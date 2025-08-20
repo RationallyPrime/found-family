@@ -42,14 +42,15 @@ class GenericMemoryRepository(Generic[T]):
         record = await result.single()
         if not record:
             from memory_palace.core.errors import ProcessingError
+
             raise ProcessingError(
                 message="Failed to store memory in database",
                 details={
                     "source": "memory_repository",
                     "operation": "store_memory",
                     "memory_id": str(memory.id),
-                    "memory_type": memory.__class__.__name__
-                }
+                    "memory_type": memory.__class__.__name__,
+                },
             )
 
         logger.debug(f"Successfully stored memory {memory.id}")
@@ -174,7 +175,7 @@ class GenericMemoryRepository(Generic[T]):
     def _record_to_memory(self, record: dict, memory_type: type[T]) -> T:
         """Convert Neo4j record to memory object."""
         from memory_palace.core.errors import ProcessingError
-        
+
         try:
             return memory_type.from_neo4j_record(record)
         except Exception as e:
@@ -188,8 +189,8 @@ class GenericMemoryRepository(Generic[T]):
                     "field": "record",
                     "actual_value": str(record)[:200],  # Truncate for readability
                     "expected_type": memory_type.__name__,
-                    "constraint": f"Must be valid {memory_type.__name__} record"
-                }
+                    "constraint": f"Must be valid {memory_type.__name__} record",
+                },
             ) from e
 
 
@@ -236,7 +237,7 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                     from pydantic import TypeAdapter
 
                     from memory_palace.domain.models.memories import Memory
-                    
+
                     adapter = TypeAdapter(Memory)
                     # Use Pydantic's validation which will raise ValidationError
                     # We'll let those bubble up as they indicate data integrity issues
@@ -245,8 +246,7 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                 else:
                     # Log missing memory_type as a warning
                     logger.warning(
-                        "Memory record missing memory_type field",
-                        extra={"record_id": memory_data.get("id")}
+                        "Memory record missing memory_type field", extra={"record_id": memory_data.get("id")}
                     )
 
             logger.debug(f"Recalled {len(memories)} memories of mixed types")
@@ -255,7 +255,7 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         except Exception as e:
             from memory_palace.core.base import DatabaseErrorDetails
             from memory_palace.core.errors import ProcessingError
-            
+
             logger.error("Failed to recall mixed memory types", exc_info=True)
             raise ProcessingError(
                 message=f"Failed to recall memories from database: {e}",
@@ -266,6 +266,6 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                     endpoint="bolt://localhost:7687",
                     status_code=500,
                     query_type="recall",
-                    table="Memory"
-                )
+                    table="Memory",
+                ),
             ) from e

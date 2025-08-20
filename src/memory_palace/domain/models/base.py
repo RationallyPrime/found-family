@@ -17,7 +17,6 @@ class MemoryType(str, Enum):
     SYSTEM_NOTE = "system_note"
 
     # Derived memories
-    CONVERSATION_TURN = "conversation_turn"
     TOPIC_CLUSTER = "topic_cluster"
     ONTOLOGY_NODE = "ontology_node"
 

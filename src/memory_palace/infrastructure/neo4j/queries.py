@@ -53,7 +53,7 @@ class MemoryQueries:
 
         query = " ".join(query_parts)
 
-        # Return query with parameter placeholders  
+        # Return query with parameter placeholders
         # Query is already LiteralString, no cast needed
         return query, {}
 
@@ -79,8 +79,33 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
-    def atomic_turn_storage() -> tuple[LiteralString, dict[str, Any]]:
-        """Atomic query for storing a complete conversation turn.
+    def store_single_message() -> tuple[LiteralString, dict[str, Any]]:
+        """Store a single message.
+
+        Returns:
+            Tuple of (query, params)
+        """
+        # Query will be built dynamically based on role
+        # This is a placeholder - actual query depends on memory type
+        query = """
+            CREATE (m:Memory {
+                id: $id,
+                content: $content,
+                embedding: $embedding,
+                salience: $salience,
+                topic_id: $topic_id,
+                conversation_id: $conversation_id,
+                timestamp: datetime(),
+                memory_type: $memory_type
+            })
+            RETURN m
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def store_message_pair() -> tuple[LiteralString, dict[str, Any]]:
+        """Store a pair of messages with a temporal relationship.
 
         Returns:
             Tuple of (query, params)
@@ -110,21 +135,10 @@ class MemoryQueries:
                 memory_type: 'claude_utterance'
             })
 
-            // Create turn node
-            CREATE (t:ConversationTurn {
-                id: $turn_id,
-                friend_utterance_id: $friend_id,
-                claude_utterance_id: $claude_id,
-                conversation_id: $conversation_id,
-                timestamp: datetime()
-            })
+            // Create relationship between messages
+            CREATE (f)-[:PRECEDES {strength: 1.0, temporal: true}]->(c)
 
-            // Create relationships
-            CREATE (f)-[:FOLLOWED_BY {strength: 1.0, sequence: 'conversation_turn'}]->(c)
-            CREATE (t)-[:HAS_FRIEND]->(f)
-            CREATE (t)-[:HAS_CLAUDE]->(c)
-
-            RETURN f, c, t
+            RETURN f, c
             """
 
         return cast(LiteralString, query), {}
@@ -237,9 +251,9 @@ class MemoryQueries:
     @staticmethod
     def get_relationship_edges() -> tuple[LiteralString, dict[str, Any]]:
         """Get all relationship edges for a specific memory.
-        
+
         Returns relationships as edges from the graph, not as nodes.
-        
+
         Returns:
             Tuple of (query, params)
         """
@@ -251,7 +265,7 @@ class MemoryQueries:
                    other.id as other_id,
                    CASE WHEN startNode(r) = m THEN 'outgoing' ELSE 'incoming' END as direction
             """
-        
+
         return cast(LiteralString, query), {}
 
 
@@ -266,7 +280,7 @@ class DreamJobQueries:
             Tuple of (query, params)
         """
         from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
-        
+
         builder = CypherQueryBuilder()
         builder.match(lambda p: p.node("Memory", "m"))
         builder.where(f"m.salience > {SALIENCE_EVICTION_THRESHOLD}")
@@ -291,7 +305,7 @@ class DreamJobQueries:
             Tuple of (query, params)
         """
         from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
-        
+
         builder = CypherQueryBuilder()
         builder.match(lambda p: p.node("Memory", "m"))
         builder.where(f"m.salience < {SALIENCE_EVICTION_THRESHOLD}")

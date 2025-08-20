@@ -10,7 +10,6 @@ This module provides a single, powerful endpoint for all query needs with:
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -18,18 +17,8 @@ from pydantic import BaseModel, Field
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.logging import get_logger
 from memory_palace.domain.specifications.memory import (
-    MemorySpecification,  # Use the discriminated union directly
     CompositeSpecification,
-    ConceptMemorySpecification,
-    ConversationMemorySpecification,
-    DecayingMemorySpecification,
-    EmotionalMemorySpecification,
-    FrequentlyAccessedSpecification,
-    OntologyPathSpecification,
-    RecentMemorySpecification,
-    RelatedMemorySpecification,
-    SalientMemorySpecification,
-    TopicMemorySpecification,
+    MemorySpecification,  # Use the discriminated union directly
 )
 from memory_palace.domain.specifications.similarity import SimilaritySpecification
 from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
@@ -107,7 +96,7 @@ class UnifiedQueryResponse(BaseModel):
 
 def parse_order_by(order_by_str: str) -> tuple[str | None, str, str] | None:
     """Parse an order_by string like 'm.timestamp DESC' into components.
-    
+
     Returns:
         Tuple of (node_alias, field_name, direction) or None if parse fails
         Example: 'm.timestamp DESC' -> ('m', 'timestamp', 'DESC')
@@ -115,15 +104,15 @@ def parse_order_by(order_by_str: str) -> tuple[str | None, str, str] | None:
     """
     if not order_by_str:
         return None
-    
+
     parts = order_by_str.strip().split()
     if not parts:
         return None
-    
+
     # Handle both "m.field DESC" and "field DESC" formats
     field_part = parts[0]
     direction = parts[1].upper() if len(parts) > 1 else "ASC"
-    
+
     if "." in field_part:
         # Format: m.field
         node_parts = field_part.split(".", 1)
@@ -132,20 +121,20 @@ def parse_order_by(order_by_str: str) -> tuple[str | None, str, str] | None:
     else:
         # Format: field (no node alias)
         return (None, field_part, direction)
-    
+
     return None
 
 
 def build_specification(filter_spec: MemorySpecification):
     """Build composite specifications if needed.
-    
+
     Since specifications are already Pydantic models, we just need to handle
     the CompositeSpecification case where we need to combine multiple specs.
     """
     if isinstance(filter_spec, CompositeSpecification):
         # Recursively build composite specifications
         sub_specs = [build_specification(spec) for spec in filter_spec.specifications]
-        
+
         if filter_spec.operator == "and":
             spec = sub_specs[0]
             for s in sub_specs[1:]:
@@ -156,7 +145,7 @@ def build_specification(filter_spec: MemorySpecification):
             for s in sub_specs[1:]:
                 spec = spec.or_(s)  # Use the or_ method
             return spec
-    
+
     # For all other specifications, they're already ready to use
     return filter_spec
 
@@ -164,7 +153,7 @@ def build_specification(filter_spec: MemorySpecification):
 @router.post("/query", response_model=UnifiedQueryResponse, operation_id="query")
 async def execute_unified_query(
     request: UnifiedQueryRequest,
-    memory_service: MemoryService = Depends(get_memory_service),  # noqa: B008
+    memory_service: MemoryService = Depends(get_memory_service),
 ) -> UnifiedQueryResponse:
     """Execute a unified query using the declarative DSL.
 
@@ -319,14 +308,12 @@ async def execute_unified_query(
                         # Use just the field alias, not node.field
                         transformed_order = f"{field_name} {direction}"
                         builder.order_by(transformed_order)
-                        logger.debug(
-                            f"Transformed ORDER BY for DISTINCT: {dsl.order_by} -> {transformed_order}"
-                        )
+                        logger.debug(f"Transformed ORDER BY for DISTINCT: {dsl.order_by} -> {transformed_order}")
                     else:
                         # Field not in RETURN clause, can't order by it with DISTINCT
                         logger.warning(
                             f"Cannot ORDER BY {field_name} with DISTINCT - field not in return_fields. Skipping ordering.",
-                            extra={"field": field_name, "return_fields": dsl.return_fields}
+                            extra={"field": field_name, "return_fields": dsl.return_fields},
                         )
                 else:
                     # Couldn't parse, use as-is and hope for the best
@@ -385,9 +372,9 @@ async def execute_unified_query(
     except Exception as e:
         from memory_palace.core.base import ServiceErrorDetails
         from memory_palace.core.errors import ProcessingError
-        
+
         logger.error("Failed to execute unified query", exc_info=True)
-        
+
         # Convert to ProcessingError for proper error handling
         error = ProcessingError(
             message=f"Failed to execute unified query: {e}",
@@ -396,7 +383,7 @@ async def execute_unified_query(
                 operation="execute_unified_query",
                 service_name="memory_palace",
                 endpoint="/api/v1/unified_query",
-                status_code=500
-            )
+                status_code=500,
+            ),
         )
         raise HTTPException(status_code=500, detail=str(error)) from e

@@ -1,8 +1,7 @@
 """Circuit breaker implementation for handling failures and retries."""
 
-import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
@@ -115,7 +114,7 @@ class CircuitBreaker(Generic[T]):
 
     async def call_async(
         self,
-        func: Callable[..., T],
+        func: Callable[..., Awaitable[T]],
         *args: Any,
         **kwargs: Any,
     ) -> T:
@@ -155,10 +154,7 @@ class CircuitBreaker(Generic[T]):
             )
 
         # Try to execute the function
-        if asyncio.iscoroutinefunction(func):
-            result = await func(*args, **kwargs)
-        else:
-            result = func(*args, **kwargs)
+        result = await func(*args, **kwargs)
         self._record_success()
         return result
 
