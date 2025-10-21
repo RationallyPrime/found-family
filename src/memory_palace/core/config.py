@@ -39,6 +39,21 @@ class Settings(BaseSettings):
     # App config
     debug: bool = True
 
+    # Salience management - configurable decay and eviction settings
+    salience_decay_enabled: bool = Field(
+        default=True, description="Whether to enable automatic salience decay over time"
+    )
+    salience_decay_factor: float = Field(
+        default=0.0154,
+        description="Exponential decay factor per refresh interval (0.0154 = 45-day half-life with 5-min refresh)",
+    )
+    salience_eviction_threshold: float = Field(
+        default=0.05, description="Memories below this salience value will be automatically deleted"
+    )
+    salience_refresh_interval_minutes: int = Field(
+        default=5, description="How often (in minutes) to run salience refresh and eviction"
+    )
+
     # Personalization
     friend_name: str = Field(default="Hákon", description="Name of the person using this Memory Palace")
     friend_pronouns: str | None = Field(default=None, description="Friend's pronouns")

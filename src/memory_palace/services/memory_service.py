@@ -77,8 +77,9 @@ class MemoryService:
         role: str,
         conversation_id: UUID | None = None,
         salience: float | None = None,
-        ontology_path: list[str] | None = None,
-        metadata: dict | None = None,
+        preserve: bool = False,
+        ontology_path: list[str] | None = None,  # noqa: ARG002
+        metadata: dict | None = None,  # noqa: ARG002
         auto_classify: bool = True,
     ):
         """Store a single memory message.
@@ -88,6 +89,7 @@ class MemoryService:
             role: Either 'user' or 'assistant'
             conversation_id: Optional conversation UUID
             salience: Importance rating (0.0-1.0)
+            preserve: If True, prevents automatic decay and eviction
             ontology_path: Hierarchical categorization
             metadata: Additional metadata
             auto_classify: Whether to auto-assign topic clusters
@@ -121,6 +123,7 @@ class MemoryService:
                 conversation_id=conversation_id,
                 topic_id=topic_id,
                 salience=memory_salience,
+                preserve=preserve,
             )
         else:  # assistant
             memory = ClaudeUtterance(
@@ -130,6 +133,7 @@ class MemoryService:
                 conversation_id=conversation_id,
                 topic_id=topic_id,
                 salience=memory_salience,
+                preserve=preserve,
             )
 
         # Store in appropriate repository based on type
@@ -206,14 +210,11 @@ class MemoryService:
         # Detect additional relationships if enabled
         if detect_relationships:
             logger.debug("Detecting semantic relationships")
-            user_relationships = await self._detect_and_create_relationships(user_memory, similarity_threshold) or []
-            assistant_relationships = (
-                await self._detect_and_create_relationships(assistant_memory, similarity_threshold) or []
-            )
+            await self._detect_and_create_relationships(user_memory, similarity_threshold)
+            await self._detect_and_create_relationships(assistant_memory, similarity_threshold)
 
-            # Update salience based on relationship count
-            await self._update_salience_from_relationships(user_memory, len(user_relationships))
-            await self._update_salience_from_relationships(assistant_memory, len(assistant_relationships))
+            # Note: Removed automatic salience boost from relationships
+            # Salience is now explicitly controlled by the user or defaults to 0.3
 
         logger.info(f"Successfully stored turn: user={user_memory.id}, assistant={assistant_memory.id}")
         return (user_memory, assistant_memory)
@@ -283,21 +284,6 @@ class MemoryService:
             return "SOLVED_BY"
         else:
             return "RELATES_TO"
-
-    async def _update_salience_from_relationships(
-        self, memory: FriendUtterance | ClaudeUtterance, relationship_count: int
-    ):
-        """Update memory salience based on relationship count and strength."""
-        # Boost salience based on how connected the memory is
-        base_boost = 0.1 * relationship_count
-        max_salience = min(1.0, memory.salience + base_boost)
-
-        # Update using repository
-        memory.salience = max_salience
-        if isinstance(memory, FriendUtterance):
-            await self.friend_repo.remember(memory)  # This will update existing
-        else:
-            await self.claude_repo.remember(memory)
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def recall_with_graph(

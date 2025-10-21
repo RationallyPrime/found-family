@@ -26,19 +26,18 @@ class StoreMemoryRequest(BaseModel):
     # Incremental ontology support
     ontology_path: list[str] | None = None
 
-    # Memory importance/salience (0.0-1.0 scale)
-    # Recalibrated scale (since we only store things worth remembering):
-    #   0.0-0.2: Background context, ambient information
-    #   0.3-0.4: Regular conversation, standard Q&A
-    #   0.5-0.6: Interesting or useful information
-    #   0.7-0.8: Important preferences, decisions, learning moments
-    #   0.9-1.0: Critical memories - core beliefs, breakthroughs, defining moments
-    # Default if not provided: 0.3 (regular conversation)
+    # Memory importance/salience - simplified from previous complex scale
     salience: float | None = Field(
         None,
         ge=0.0,
         le=1.0,
-        description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number",
+        description="Importance rating (0-1). Leave unset for default (0.3). Higher = more important. Use 1.0 + preserve=true for must-keep memories.",
+    )
+
+    # Preservation flag - the easiest way to keep important memories safe
+    preserve: bool = Field(
+        False,
+        description="If true, prevents automatic decay and deletion. Recommended for critical memories.",
     )
 
     @field_validator("salience", mode="before")
@@ -118,7 +117,14 @@ async def remember_message(
     request: StoreMemoryRequest,
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> StoreMemoryResponse:
-    """Store a single memory."""
+    """Store a single memory with optional importance rating.
+
+    The salience (importance) parameter controls how this memory is prioritized:
+    - Leave unset (default 0.3) for regular conversation
+    - Use 0.6-0.8 for important information
+    - Use 1.0 for critical memories you never want to lose
+    - Set preserve=true to prevent any automatic decay or deletion
+    """
     logger.info(
         "Storing memory",
         extra={
@@ -133,6 +139,7 @@ async def remember_message(
         role=request.role,
         conversation_id=request.conversation_id,
         salience=request.salience,  # Pass through the importance rating
+        preserve=request.preserve,  # Pass through the preservation flag
         ontology_path=request.ontology_path,
         metadata=request.metadata,
     )
@@ -147,7 +154,11 @@ async def remember_batch(
     request: StoreBatchRequest,
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> StoreBatchResponse:
-    """Store multiple memories at once."""
+    """Store multiple memories at once with optional temporal linking.
+
+    Use create_temporal_links=true to create PRECEDES relationships between consecutive memories.
+    Each memory can have its own salience and preserve settings.
+    """
     logger.info(
         "Storing batch of memories",
         extra={
@@ -162,6 +173,7 @@ async def remember_batch(
             role=mem_request.role,
             conversation_id=mem_request.conversation_id,
             salience=mem_request.salience,
+            preserve=mem_request.preserve,
             ontology_path=mem_request.ontology_path,
             metadata=mem_request.metadata,
         )
@@ -183,7 +195,11 @@ async def recall_memories(
     request: SearchRequest,
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> SearchResponse:
-    """Search and recall relevant memories."""
+    """Search and recall relevant memories using semantic similarity.
+
+    Returns the top k memories that match your query. Use min_salience to filter
+    out less important memories. Results are ranked by semantic similarity.
+    """
     logger.info("Searching memories", extra={"query": request.query, "k": request.k, "threshold": request.threshold})
 
     messages = await memory_service.search_memories(

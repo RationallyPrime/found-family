@@ -274,23 +274,16 @@ class DreamJobQueries:
 
     @staticmethod
     def refresh_salience() -> tuple[LiteralString, dict[str, Any]]:
-        """Apply exponential decay to memory salience.
+        """Apply exponential decay to memory salience (only to non-preserved memories).
 
         Returns:
             Tuple of (query, params)
         """
-        from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
-
-        builder = CypherQueryBuilder()
-        builder.match(lambda p: p.node("Memory", "m"))
-        builder.where(f"m.salience > {SALIENCE_EVICTION_THRESHOLD}")
-        builder.set_property("m", {"salience": "m.salience * $decay_factor"})
-        builder.return_clause("count(m) as updated")
-
-        # For now, use raw query since SET needs expression support
-        query = f"""
+        # Respect preserve flag - only decay memories that are not marked as preserve
+        query = """
             MATCH (m:Memory)
-            WHERE m.salience > {SALIENCE_EVICTION_THRESHOLD}
+            WHERE (m.preserve = false OR m.preserve IS NULL)
+            AND m.salience > $eviction_threshold
             SET m.salience = m.salience * $decay_factor
             RETURN count(m) as updated
             """
@@ -299,26 +292,21 @@ class DreamJobQueries:
 
     @staticmethod
     def evict_low_salience() -> tuple[LiteralString, dict[str, Any]]:
-        """Remove memories with very low salience.
+        """Remove memories with very low salience (only non-preserved memories).
+
+        This returns evicted memories for audit trail before deletion.
 
         Returns:
             Tuple of (query, params)
         """
-        from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
-
-        builder = CypherQueryBuilder()
-        builder.match(lambda p: p.node("Memory", "m"))
-        builder.where(f"m.salience < {SALIENCE_EVICTION_THRESHOLD}")
-        builder.detach_delete("m")
-        builder.return_clause("count(m) as evicted")
-
-        # Build returns validation error, use raw for now
-        query = f"""
+        # Respect preserve flag - only evict memories that are not marked as preserve
+        query = """
             MATCH (m:Memory)
-            WHERE m.salience < {SALIENCE_EVICTION_THRESHOLD}
-            WITH m, m.id as id
+            WHERE (m.preserve = false OR m.preserve IS NULL)
+            AND m.salience < $eviction_threshold
+            WITH m, m.id as id, m.content as content, m.salience as salience
             DETACH DELETE m
-            RETURN count(id) as evicted
+            RETURN count(id) as evicted, collect({id: id, content: substring(content, 0, 100), salience: salience}) as evicted_memories
             """
 
         return cast(LiteralString, query), {}

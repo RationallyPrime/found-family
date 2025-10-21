@@ -13,7 +13,8 @@ class FriendUtterance(GraphModel):
     content: str
     embedding: list[float] | None = None
     topic_id: int | None = None
-    salience: float = 0.5
+    salience: float = 0.3  # Fixed: unified default from 0.5 to match API constants
+    preserve: bool = False  # If True, prevents automatic decay and eviction
     conversation_id: UUID | None = None
 
     def __str__(self) -> str:
@@ -27,7 +28,8 @@ class ClaudeUtterance(GraphModel):
     content: str
     embedding: list[float] | None = None
     topic_id: int | None = None
-    salience: float = 0.5
+    salience: float = 0.3  # Fixed: unified default from 0.5 to match API constants
+    preserve: bool = False  # If True, prevents automatic decay and eviction
     conversation_id: UUID | None = None
 
     def __str__(self) -> str:

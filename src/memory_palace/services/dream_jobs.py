@@ -26,14 +26,17 @@ class DreamJobOrchestrator:
         clusterer: "ClusteringService",
         decay_lambda: float | None = None,
     ):
-        from memory_palace.core.constants import SALIENCE_DECAY_FACTOR_DEFAULT
+        from memory_palace.core.config import settings
 
         self.driver = driver
         self.embeddings = embeddings
         self.clusterer = clusterer
+        # Use configurable settings
         if decay_lambda is None:
-            decay_lambda = SALIENCE_DECAY_FACTOR_DEFAULT
+            decay_lambda = settings.salience_decay_factor
         self.decay_factor = 1 - decay_lambda  # Convert to decay factor
+        self.eviction_threshold = settings.salience_eviction_threshold
+        self.decay_enabled = settings.salience_decay_enabled
         self.scheduler = AsyncIOScheduler()
         self._setup_jobs()
 
@@ -43,21 +46,23 @@ class DreamJobOrchestrator:
 
     def _setup_jobs(self):
         """Configure the dream jobs with proper scheduling."""
+        from memory_palace.core.config import settings
         from memory_palace.core.constants import (
             CLUSTER_RECENT_INTERVAL_HOURS,
             NIGHTLY_RECLUSTER_HOUR,
             NIGHTLY_RECLUSTER_MINUTE,
-            SALIENCE_REFRESH_INTERVAL_MINUTES,
         )
 
-        self.scheduler.add_job(
-            self.refresh_salience,
-            "interval",
-            minutes=SALIENCE_REFRESH_INTERVAL_MINUTES,
-            id="salience_refresh",
-            max_instances=1,
-            coalesce=True,
-        )
+        # Only add salience refresh job if decay is enabled
+        if self.decay_enabled:
+            self.scheduler.add_job(
+                self.refresh_salience,
+                "interval",
+                minutes=settings.salience_refresh_interval_minutes,
+                id="salience_refresh",
+                max_instances=1,
+                coalesce=True,
+            )
         self.scheduler.add_job(
             self.cluster_recent,
             "interval",
@@ -86,24 +91,39 @@ class DreamJobOrchestrator:
     @with_session()
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def refresh_salience(self, session):
-        """Update salience with exponential decay and evict low-salience memories."""
-        # Use centralized query
+        """Update salience with exponential decay and evict low-salience memories.
+
+        Only processes memories that are not marked as preserved.
+        """
+        # Use centralized query with configurable threshold
         query, _ = DreamJobQueries.refresh_salience()
         result = await session.run(
             query,
             decay_factor=self.decay_factor,
+            eviction_threshold=self.eviction_threshold,
         )
         record = await result.single()
         updated = record["updated"] if record else 0
-        logger.info(f"Applied salience decay to {updated} memories")
+        logger.info(
+            f"Applied salience decay to {updated} memories (preserved memories skipped)",
+            extra={"decay_factor": self.decay_factor, "threshold": self.eviction_threshold},
+        )
 
-        # Use centralized query for eviction
+        # Use centralized query for eviction with audit trail
         query, _ = DreamJobQueries.evict_low_salience()
-        result = await session.run(query)
+        result = await session.run(query, eviction_threshold=self.eviction_threshold)
         record = await result.single()
         evicted = record["evicted"] if record else 0
         if evicted > 0:
-            logger.info(f"Evicted {evicted} low-salience memories")
+            evicted_memories = record.get("evicted_memories", [])
+            logger.warning(
+                f"Evicted {evicted} low-salience memories (preserved memories skipped)",
+                extra={
+                    "evicted_count": evicted,
+                    "threshold": self.eviction_threshold,
+                    "sample_evicted": evicted_memories[:5],  # Log first 5 for audit trail
+                },
+            )
 
     @with_session()
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
