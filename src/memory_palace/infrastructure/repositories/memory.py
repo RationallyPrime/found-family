@@ -133,22 +133,10 @@ class GenericMemoryRepository[T: GraphModel]:
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def delete(self, memory_id: UUID, memory_type: type[T] | None = None):
-        """Delete a memory and all its relationships."""
-        if memory_type:
-            labels = memory_type.labels()
-            labels_str = ":".join(labels)
-            query = f"""
-                MATCH (m:{labels_str} {{id: $id}})
-                DETACH DELETE m
-                """
-        else:
-            # Delete by ID regardless of type
-            query = """
-                MATCH (m:Memory {id: $id})
-                DETACH DELETE m
-                """
+        """Delete a memory and all its relationships (administrative use only)."""
+        query, _ = MemoryQueries.delete_memory(memory_type.labels() if memory_type else None)
 
-        await self.session.run(cast(LiteralString, query), id=str(memory_id))
+        await self.session.run(query, id=str(memory_id))
         logger.debug(f"Deleted memory {memory_id}")
 
     def _build_where_clause(self, filters: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
@@ -278,6 +266,7 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
                 activated.append((memory, record["activation"]))
         return activated
 
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def recall_any(
         self,
         filters: dict[str, Any] | None = None,
@@ -286,53 +275,34 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         offset: int = 0,
     ) -> list[Memory]:
         """Recall memories of any type using the discriminated union."""
-        try:
-            if similarity_search:
-                embedding, threshold = similarity_search
-                # Use centralized query factory (no specific labels for Memory union)
-                query, params = QueryFactory.build_similarity_search(
-                    embedding=embedding,
-                    threshold=threshold,
-                    limit=limit,
-                    offset=offset,
-                    labels=None,  # No specific labels for discriminated union
-                    filters=filters,
-                )
-            else:
-                # Use centralized query factory
-                query, params = QueryFactory.build_filtered_recall(
-                    labels=["Memory"],  # Base Memory label
-                    filters=filters,
-                    limit=limit,
-                    offset=offset,
-                )
+        if similarity_search:
+            embedding, threshold = similarity_search
+            # Use centralized query factory (no specific labels for Memory union)
+            query, params = QueryFactory.build_similarity_search(
+                embedding=embedding,
+                threshold=threshold,
+                limit=limit,
+                offset=offset,
+                labels=None,  # No specific labels for discriminated union
+                filters=filters,
+            )
+        else:
+            # Use centralized query factory
+            query, params = QueryFactory.build_filtered_recall(
+                labels=["Memory"],  # Base Memory label
+                filters=filters,
+                limit=limit,
+                offset=offset,
+            )
 
-            result = await self.session.run(cast(LiteralString, query), **params)
+        result = await self.session.run(cast(LiteralString, query), **params)
 
-            memories = []
-            async for record in result:
-                # Use the discriminated union to automatically determine type
-                memory = self._validate_union_record(record["m"])
-                if memory is not None:
-                    memories.append(memory)
+        memories = []
+        async for record in result:
+            # Use the discriminated union to automatically determine type
+            memory = self._validate_union_record(record["m"])
+            if memory is not None:
+                memories.append(memory)
 
-            logger.debug(f"Recalled {len(memories)} memories of mixed types")
-            return memories
-
-        except Exception as e:
-            from memory_palace.core.base import DatabaseErrorDetails
-            from memory_palace.core.errors import ProcessingError
-
-            logger.error("Failed to recall mixed memory types", exc_info=True)
-            raise ProcessingError(
-                message=f"Failed to recall memories from database: {e}",
-                details=DatabaseErrorDetails(
-                    source="memory_repository",
-                    operation="recall_any",
-                    service_name="neo4j",
-                    endpoint="bolt://localhost:7687",
-                    status_code=500,
-                    query_type="recall",
-                    table="Memory",
-                ),
-            ) from e
+        logger.debug(f"Recalled {len(memories)} memories of mixed types")
+        return memories

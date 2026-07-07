@@ -1,5 +1,6 @@
 """Circuit breaker implementation for handling failures and retries."""
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from enum import Enum
@@ -275,8 +276,9 @@ class RetryWithCircuitBreaker:
             Last exception encountered after all retries
         """
         last_exception: Exception | None = None
+        delay = self.initial_delay
 
-        for _attempt in range(1, self.max_retries + 1):
+        for attempt in range(1, self.max_retries + 1):
             # Check circuit breaker state first
             if self.circuit_breaker.state == CircuitState.OPEN and not self.circuit_breaker._should_attempt_reset():
                 # Circuit is open and not ready to reset
@@ -293,9 +295,22 @@ class RetryWithCircuitBreaker:
                     ),
                 )
 
-            # Attempt the call
-            result = await self.circuit_breaker.call_async(func, *args, **kwargs)
-            return result
+            # Attempt the call; retry only the configured exception types.
+            # This try/except IS the retry mechanism — the one place the
+            # no-try-except rule doesn't apply, because this module is the
+            # error-handling infrastructure itself.
+            try:
+                return await self.circuit_breaker.call_async(func, *args, **kwargs)
+            except self.retryable_exceptions as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    logger.warning(
+                        f"Retryable failure on '{self.circuit_breaker.name}' "
+                        f"(attempt {attempt}/{self.max_retries}), retrying in {delay:.1f}s",
+                        error=str(e),
+                    )
+                    await asyncio.sleep(delay)
+                    delay = min(delay * self.backoff_factor, self.max_delay)
 
         # All retries exhausted
         if last_exception:

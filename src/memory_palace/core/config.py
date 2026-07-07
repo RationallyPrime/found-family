@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # App config
     debug: bool = True
 
+    # Embeddings
+    voyage_model: str = "voyage-3-large"
+
     # Consolidation dream job (episodic -> semantic distillation)
     consolidation_model: str = "anthropic:claude-sonnet-5"
 

@@ -112,8 +112,8 @@ class VoyageEmbeddingService:
                 details=details,
             )
 
-        # Use the model from settings or the one provided, or default to voyage-3-large
-        self.model = model or getattr(settings, "voyage_code_model", "voyage-3-large")
+        # Use the model provided, or the one from settings
+        self.model = model or settings.voyage_model
         self.default_embedding_type = default_embedding_type
 
         # Set the environment variable for voyageai to pick up
@@ -142,29 +142,19 @@ class VoyageEmbeddingService:
             retryable_exceptions=(RateLimitError, TimeoutError),
         )
 
-    async def _generate_embedding(self, text: str) -> list[float]:
-        """Generate a fresh embedding via the Voyage API."""
+    @with_error_handling(error_level=ErrorLevel.ERROR)
+    async def embed_text(self, text: str) -> list[float]:
+        """Generate an embedding vector for the provided text with caching.
+
+        Uncached embeds go through the same circuit-breaker + retry path
+        as batch embeds — single-text calls get identical failure protection.
+        """
         if not text.strip():
             raise ProcessingError(
                 message="Cannot embed empty text",
                 details={"text_length": len(text)},
             )
 
-        batch_texts = [text]
-        response = await self.client.embed(texts=batch_texts, model=self.model)
-
-        embeddings = getattr(response, "embeddings", [])
-        if not embeddings:
-            raise ProcessingError(
-                message="Failed to generate embedding for text",
-                details={"text_length": len(text)},
-            )
-
-        return cast("list[float]", embeddings[0])
-
-    @with_error_handling(error_level=ErrorLevel.ERROR)
-    async def embed_text(self, text: str) -> list[float]:
-        """Generate an embedding vector for the provided text with caching."""
         if self.cache:
             # Pass model name for cache key to prevent cross-model contamination
             cached = await self.cache.get_cached(text, self.model)
@@ -172,7 +162,8 @@ class VoyageEmbeddingService:
                 logger.debug(f"Embedding cache hit for text: {text[:50]}... (model: {self.model})")
                 return cached
 
-        embedding = await self._generate_embedding(text)
+        embeddings = await self._retry_handler.call_async(self._call_voyage_api_internal, [text])
+        embedding = embeddings[0]
 
         if self.cache:
             # Store with model and dimension metadata

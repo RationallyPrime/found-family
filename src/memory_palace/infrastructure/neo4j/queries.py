@@ -109,6 +109,22 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
+    def delete_memory(labels: list[str] | None = None) -> tuple[LiteralString, dict[str, Any]]:
+        """Hard-delete a memory and its relationships by id.
+
+        For explicit administrative deletion only — lifecycle machinery
+        archives, it never deletes.
+        """
+        labels_str = ":".join(labels) if labels else "Memory"
+
+        query = f"""
+            MATCH (m:{labels_str} {{id: $id}})
+            DETACH DELETE m
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
     def detect_relationships() -> tuple[LiteralString, dict[str, Any]]:
         """Find similar memories for relationship detection."""
         query = """
@@ -403,7 +419,39 @@ class ConsolidationQueries:
 
 
 class CacheQueries:
-    """Queries for cache management."""
+    """Queries for the Neo4j-backed embedding cache."""
+
+    @staticmethod
+    def get_cached_embedding() -> tuple[LiteralString, dict[str, Any]]:
+        """Fetch a cached embedding (model-scoped, 30-day TTL), counting the hit.
+
+        Params: $key, $model
+        """
+        query = """
+            MATCH (e:EmbeddingCache {cache_key: $key, model: $model})
+            WHERE e.created > datetime() - duration('P30D')
+            SET e.hit_count = coalesce(e.hit_count, 0) + 1
+            RETURN e.vector AS embedding
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def store_embedding() -> tuple[LiteralString, dict[str, Any]]:
+        """Store an embedding in the cache with model metadata.
+
+        Params: $key, $model, $embedding, $dimensions, $text
+        """
+        query = """
+            MERGE (e:EmbeddingCache {cache_key: $key, model: $model})
+            ON CREATE SET e.hit_count = 0
+            SET e.vector = $embedding,
+                e.dimensions = $dimensions,
+                e.created = datetime(),
+                e.text_preview = left($text, 100)
+            """
+
+        return cast(LiteralString, query), {}
 
     @staticmethod
     def get_cache_stats() -> tuple[LiteralString, dict[str, Any]]:

@@ -26,7 +26,6 @@ from memory_palace.infrastructure.embeddings.factory import (
     create_embedding_service,
 )
 from memory_palace.infrastructure.neo4j.driver import (
-    Neo4jQuery,
     create_neo4j_driver,
     ensure_vector_index,
 )
@@ -93,7 +92,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         # Set global dependencies for API endpoints
         dependencies.neo4j_driver = neo4j_driver
         dependencies.embedding_service = embedding_service
-        dependencies.neo4j_query = Neo4jQuery(neo4j_driver)
         dependencies.clustering_service = clustering_service
 
         # Note: We'll create sessions per-request, not hold one open
