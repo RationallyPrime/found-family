@@ -234,6 +234,19 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
         return scored
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def top_salient(self, limit: int = 10) -> list[Memory]:
+        """Most important unarchived memories, by salience then recency."""
+        query, _ = MemoryQueries.top_salient()
+        result = await self.session.run(query, limit=limit)
+
+        memories: list[Memory] = []
+        async for record in result:
+            memory = self._validate_union_record(record["m"])
+            if memory is not None:
+                memories.append(memory)
+        return memories
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def expand_from_seeds(
         self,
         seeds: list[tuple[UUID, float]],

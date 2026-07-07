@@ -187,6 +187,66 @@ class MemoryQueries:
 
         return cast(LiteralString, query), {}
 
+    @staticmethod
+    def top_salient() -> tuple[LiteralString, dict[str, Any]]:
+        """Most important unarchived memories, by salience then recency.
+
+        Params: $limit
+        """
+        query = """
+            MATCH (m:Memory)
+            WHERE NOT m:Archived AND m.salience IS NOT NULL
+            RETURN m
+            ORDER BY m.salience DESC, m.timestamp DESC
+            LIMIT $limit
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def archive_memory() -> tuple[LiteralString, dict[str, Any]]:
+        """Archive a single memory by id (reversible :Archived label).
+
+        Params: $id
+        """
+        query = """
+            MATCH (m:Memory {id: $id})
+            SET m:Archived
+            RETURN count(m) AS archived
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def palace_stats() -> tuple[LiteralString, dict[str, Any]]:
+        """Global statistics for the palace: counts by type, time span, health."""
+        query = """
+            MATCH (m:Memory)
+            WITH count(m) AS total,
+                 sum(CASE WHEN m:Archived THEN 1 ELSE 0 END) AS archived,
+                 min(m.timestamp) AS oldest,
+                 max(m.timestamp) AS newest,
+                 avg(m.salience) AS avg_salience,
+                 sum(CASE WHEN coalesce(m.pinned, false) THEN 1 ELSE 0 END) AS pinned
+            OPTIONAL MATCH (:Memory)-[r]-(:Memory)
+            RETURN total, archived, oldest, newest, avg_salience, pinned,
+                   count(DISTINCT r) AS relationships
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def type_counts() -> tuple[LiteralString, dict[str, Any]]:
+        """Unarchived memory counts grouped by memory_type."""
+        query = """
+            MATCH (m:Memory)
+            WHERE NOT m:Archived
+            RETURN m.memory_type AS memory_type, count(*) AS count
+            ORDER BY count DESC
+            """
+
+        return cast(LiteralString, query), {}
+
 
 class DreamJobQueries:
     """All dream job/maintenance queries in one place."""

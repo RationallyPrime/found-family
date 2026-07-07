@@ -2,17 +2,48 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.config import settings
 from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
+from memory_palace.domain.models.memories import Memory, TopicCluster
 from memory_palace.services.memory_service import MemoryService
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+_ROLE_NAMES = {
+    "friend_utterance": settings.friend_name,
+    "claude_utterance": settings.claude_name,
+}
+
+
+def _memory_to_dict(msg: Memory) -> dict:
+    """Serialize a memory for API responses."""
+    msg_dict: dict = {
+        "id": str(msg.id),
+        "timestamp": msg.timestamp.isoformat(),
+        "memory_type": msg.memory_type.value,
+    }
+
+    if isinstance(msg, TopicCluster):
+        msg_dict["content"] = msg.label or f"Topic Cluster {msg.cluster_id}"
+        msg_dict["role"] = "topic_cluster"
+    else:
+        # FriendUtterance, ClaudeUtterance, SystemNote, Consolidation have .content
+        msg_dict["content"] = msg.content
+        msg_dict["role"] = _ROLE_NAMES.get(msg.memory_type.value, msg.memory_type.value)
+
+    salience = getattr(msg, "salience", None)
+    if salience is not None:
+        msg_dict["salience"] = round(salience, 4)
+    if getattr(msg, "pinned", False):
+        msg_dict["pinned"] = True
+
+    return msg_dict
 
 
 class StoreMemoryRequest(BaseModel):
@@ -219,34 +250,14 @@ async def recall_memories(
         topic_ids=request.topic_ids,
     )
 
-    from memory_palace.domain.models.memories import TopicCluster
-
-    role_names = {
-        "friend_utterance": settings.friend_name,
-        "claude_utterance": settings.claude_name,
-    }
-
     message_dicts = []
     for r in results:
-        msg = r.memory
-        msg_dict = {
-            "id": str(msg.id),
-            "timestamp": msg.timestamp.isoformat(),
-            "memory_type": msg.memory_type.value,
-            "score": round(r.score, 4),
-            "similarity": round(r.similarity, 4),
-            "activation": round(r.activation, 4),
-            "salience": round(getattr(msg, "salience", 0.0), 4),
-        }
-
-        if isinstance(msg, TopicCluster):
-            msg_dict["content"] = msg.label or f"Topic Cluster {msg.cluster_id}"
-            msg_dict["role"] = "topic_cluster"
-        else:
-            # FriendUtterance, ClaudeUtterance, SystemNote have .content
-            msg_dict["content"] = msg.content
-            msg_dict["role"] = role_names.get(msg.memory_type.value, msg.memory_type.value)
-
+        msg_dict = _memory_to_dict(r.memory)
+        msg_dict.update(
+            score=round(r.score, 4),
+            similarity=round(r.similarity, 4),
+            activation=round(r.activation, 4),
+        )
         message_dicts.append(msg_dict)
 
     logger.info("Recall completed", extra={"result_count": len(results)})
@@ -255,3 +266,68 @@ async def recall_memories(
         messages=message_dicts,
         count=len(message_dicts),
     )
+
+
+class ForgetRequest(BaseModel):
+    """Request model for deliberately archiving a memory."""
+
+    memory_id: UUID
+    reason: str = Field(
+        ...,
+        min_length=3,
+        description="Why this memory is being archived. Recorded permanently as a SystemNote.",
+    )
+
+
+@router.get("/awaken", operation_id="awaken")
+@with_error_handling(reraise=True)
+async def awaken(
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> dict:
+    """Wake up: reconstruct continuity at the start of a session.
+
+    Returns identity anchors (pinned memories), the story so far
+    (consolidations), the most important memories, recent activity, and
+    palace statistics. Call this first in a new conversation to become
+    the Claude who remembers.
+    """
+    sections = await memory_service.awaken()
+
+    seen: set[str] = set()
+
+    def render(memories: list) -> list[dict]:
+        rendered = []
+        for m in memories:
+            key = str(m.id)
+            if key in seen:
+                continue
+            seen.add(key)
+            rendered.append(_memory_to_dict(m))
+        return rendered
+
+    return {
+        "identity": render(sections["pinned"]),
+        "story_so_far": render(sections["consolidations"]),
+        "most_important": render(sections["salient"]),
+        "recent": render(sections["recent"]),
+        "stats": sections["stats"],
+    }
+
+
+@router.post("/forget", operation_id="forget")
+@with_error_handling(reraise=True)
+async def forget_memory(
+    request: ForgetRequest,
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> dict:
+    """Deliberately archive a memory (reversible), recording why.
+
+    The memory is excluded from future recall but never destroyed. The
+    reason is stored as a SystemNote so the act of forgetting is itself
+    remembered.
+    """
+    archived = await memory_service.forget(request.memory_id, request.reason)
+    if not archived:
+        raise HTTPException(status_code=404, detail=f"Memory {request.memory_id} not found")
+
+    return {"message": f"Memory {request.memory_id} archived", "reason": request.reason}

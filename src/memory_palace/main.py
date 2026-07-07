@@ -177,8 +177,25 @@ app.include_router(core.router)
 app.include_router(admin.router)
 app.include_router(oauth.router)  # Include OAuth endpoints for Claude.ai MCP
 
-# Add MCP support
-mcp = FastApiMCP(app)
+# Add MCP support — expose only the memory verbs as tools.
+# OAuth/discovery endpoints stay HTTP-only; a memory palace's tool list
+# should read like memory: remember, recall, awaken, forget.
+mcp = FastApiMCP(
+    app,
+    name="Memory Palace",
+    description="Persistent memory for AI continuity of experience: remember, recall, awaken, forget.",
+    include_operations=[
+        "remember",
+        "remember_batch",
+        "recall",
+        "awaken",
+        "forget",
+        "health",
+        "job_status",
+        "trigger",
+        "cache_stats",
+    ],
+)
 mcp.mount_http()  # Creates MCP server at /mcp with HTTPS support
 
 

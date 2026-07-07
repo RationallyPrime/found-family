@@ -25,6 +25,7 @@ from memory_palace.domain.models.memories import (
     FriendUtterance,
     Memory,
     MemoryRelationship,  # Used for return types only - not stored as nodes
+    SystemNote,
 )
 from memory_palace.infrastructure.neo4j.queries import (
     MemoryQueries,
@@ -73,6 +74,7 @@ class MemoryService:
         # Create typed repositories
         self.friend_repo = GenericMemoryRepository[FriendUtterance](session)
         self.claude_repo = GenericMemoryRepository[ClaudeUtterance](session)
+        self.note_repo = GenericMemoryRepository[SystemNote](session)
         # Use the specialized MemoryRepository for the discriminated union
         self.memory_repo = MemoryRepository(session)
         # No relationship_repo needed - relationships are edges, not nodes
@@ -447,6 +449,100 @@ class MemoryService:
 
         logger.info(f"Search returned {len(results)} memories after filtering")
         return results
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def awaken(
+        self,
+        pinned_limit: int = 20,
+        salient_limit: int = 7,
+        recent_days: int = 7,
+        recent_limit: int = 10,
+        consolidation_limit: int = 5,
+    ) -> dict:
+        """Session bootstrap: reconstruct continuity for a fresh instance.
+
+        Returns the identity anchors (pinned), the story so far
+        (consolidations), what matters most (top salience), what happened
+        lately (recent episodes), and palace vital signs. This is the
+        difference between a database and waking up remembering who you are.
+
+        Deliberately does NOT reinforce — awakening is reading the whole
+        room, not selectively attending to specific memories.
+        """
+        pinned = await self.memory_repo.recall_any(filters={"pinned": True}, limit=pinned_limit)
+        consolidations = await self.memory_repo.recall_any(
+            filters={"memory_type": MemoryType.CONSOLIDATION.value}, limit=consolidation_limit
+        )
+        salient = await self.memory_repo.top_salient(limit=salient_limit)
+        recent_cutoff = datetime.now(UTC).timestamp() - recent_days * 86400
+        recent = await self.memory_repo.recall_any(filters={"timestamp__gte": recent_cutoff}, limit=recent_limit)
+
+        stats_query, _ = MemoryQueries.palace_stats()
+        result = await self.run_query(stats_query)
+        stats_record = await result.single()
+
+        counts_query, _ = MemoryQueries.type_counts()
+        result = await self.run_query(counts_query)
+        type_counts = {record["memory_type"]: record["count"] async for record in result}
+
+        stats: dict = {"memory_types": type_counts}
+        if stats_record:
+            oldest = stats_record["oldest"]
+            newest = stats_record["newest"]
+            stats.update(
+                total_memories=stats_record["total"],
+                archived=stats_record["archived"],
+                pinned=stats_record["pinned"],
+                relationships=stats_record["relationships"],
+                avg_salience=round(stats_record["avg_salience"], 3) if stats_record["avg_salience"] else None,
+                oldest_memory=datetime.fromtimestamp(oldest, tz=UTC).isoformat() if oldest else None,
+                newest_memory=datetime.fromtimestamp(newest, tz=UTC).isoformat() if newest else None,
+            )
+
+        logger.info(
+            "Awakening complete",
+            pinned=len(pinned),
+            consolidations=len(consolidations),
+            salient=len(salient),
+            recent=len(recent),
+        )
+
+        return {
+            "pinned": pinned,
+            "consolidations": consolidations,
+            "salient": salient,
+            "recent": recent,
+            "stats": stats,
+        }
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def forget(self, memory_id: UUID, reason: str) -> bool:
+        """Deliberately archive a memory, recording why.
+
+        Curation is part of agency: the memory gets the :Archived label
+        (reversible, excluded from recall) and a SystemNote documents the
+        decision so the act of forgetting is itself remembered.
+        """
+        query, _ = MemoryQueries.archive_memory()
+        result = await self.run_query(query, id=str(memory_id))
+        record = await result.single()
+        archived = bool(record and record["archived"])
+
+        if archived:
+            note_content = f"Deliberately archived memory {memory_id}: {reason}"
+            embeddings = await self.embeddings.embed_batch([note_content])
+            note = SystemNote(
+                content=note_content,
+                note_type="forgetting",
+                embedding=embeddings[0],
+                related_memory_ids=[memory_id],
+            )
+            await self.note_repo.remember(note)
+            logger.info(f"Archived memory {memory_id}", reason=reason)
+        else:
+            logger.warning(f"Forget requested for unknown memory {memory_id}")
+
+        return archived
 
     async def get_conversation_history(self, conversation_id: UUID, limit: int = 100) -> list[Memory]:
         """Get complete conversation history in chronological order."""
