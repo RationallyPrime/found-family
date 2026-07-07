@@ -348,15 +348,21 @@ class VoyageEmbeddingService:
         Returns:
             Number of dimensions in the embedding vectors
         """
-        # Voyage model dimensions
-        # This should be obtained from a config/settings
+        # Voyage model default dimensions. The voyage-4 family supports
+        # 256/512/1024/2048 via output_dimension; we use the 1024 default.
+        # NOTE: voyage-3 and voyage-4 embeddings are NOT compatible in the
+        # same vector space — changing families requires re-embedding the
+        # corpus (scripts/reembed_corpus.py).
         MODEL_DIMENSIONS = {
+            "voyage-4-large": 1024,
+            "voyage-4": 1024,
+            "voyage-4-lite": 1024,
+            "voyage-3-large": 1024,
+            "voyage-3": 1024,
             "voyage-01": 1024,
             "voyage-02": 1536,
             "voyage-large-2": 1536,
             "voyage-code-2": 1536,
-            "voyage-3-large": 1024,  # New model with 1024 dimensions
-            "voyage-3": 1024,
         }
 
         return MODEL_DIMENSIONS.get(self.model, 1024)  # Default to 1024

@@ -50,8 +50,9 @@ Edges:   PRECEDES (temporal), RELATES_TO / SIMILAR_TO / ... (semantic, auto-dete
          CONSOLIDATED_FROM (consolidation → source episodes)
 
 Properties contract (GraphModel): UUIDs as strings, datetimes as UTC epoch floats,
-enums as values. Embeddings: 1024-dim (voyage-3), native vector index
-`memory_embeddings` (cosine).
+enums as values. Embeddings: 1024-dim (voyage-4-large; settings.voyage_model),
+native vector index `memory_embeddings` (cosine). Changing embedding model
+FAMILY requires re-embedding the corpus: scripts/reembed_corpus.py.
 ```
 
 Domain models: `src/memory_palace/domain/models/base.py` (GraphModel, MemoryType) and

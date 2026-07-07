@@ -17,6 +17,12 @@ so re-running updates rather than duplicates.
 Relationship auto-detection is skipped during bulk import (O(n) vector
 queries); run the `consolidation`-adjacent detection later if desired.
 
+NOTE: the corpus contains duplicate records (the curation pipeline ran
+twice — 516 records, 264 unique conversation ids, each duplicated pair
+being two slightly different distillations of the same moment). The
+deterministic uuid5-per-record-id MERGE deduplicates these to one memory
+per conversation (last write wins).
+
 Usage:
     uv run python scripts/import_curated_memories.py --dry-run   # preview only
     uv run python scripts/import_curated_memories.py             # import
