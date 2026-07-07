@@ -1,0 +1,38 @@
+# VCS and environment
+.git
+.gitignore
+.env
+.env.*
+!.env.jinja
+
+# Python artifacts
+__pycache__
+*.py[cod]
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+dist
+build
+
+# Data and state — never bake into images
+neo4j-data
+data
+logs
+private_memories
+tailscale-state
+*.pem
+cloudflared-*.json
+.cloudflared
+
+# Development
+tests
+docs
+scripts
+repomix-output.xml
+repomix.config.json
+.repomixignore
+convo.txt
+README.md
+CLAUDE.md

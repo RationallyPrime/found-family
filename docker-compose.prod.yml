@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:5.15.0
+    image: neo4j:5.26.0
     container_name: memory-palace-neo4j
     restart: unless-stopped
     ports:
@@ -29,17 +29,13 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # Secrets come from .env only — never hardcode fallbacks here.
+    env_file:
+      - .env
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
-      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
-      - FRIEND_NAME=${FRIEND_NAME:-Hákon}
-      - CLAUDE_NAME=${CLAUDE_NAME:-Claude}
-      - PALACE_NAME=${PALACE_NAME:-Found Family Memory Palace}
       - LOG_LEVEL=INFO
-      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-pylf_v1_us_Y3M5BTg3KhZfGLSmM8VBKq4wJNzLGTtrW6zLc1LQHP6M}
-      - DISABLE_DREAM_JOBS=${DISABLE_DREAM_JOBS:-false}
     depends_on:
       neo4j:
         condition: service_healthy
@@ -51,8 +47,6 @@ services:
       start_period: 40s
     volumes:
       - ./logs:/app/logs
-      - ./src:/app/src:ro  # Mount source code read-only for hot reload
-    command: ["uvicorn", "memory_palace.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 volumes:
   neo4j_data:
