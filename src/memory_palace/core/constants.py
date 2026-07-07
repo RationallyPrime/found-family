@@ -46,6 +46,14 @@ RELATIONSHIP_STRENGTH_MIN = 0.0
 RELATIONSHIP_STRENGTH_MAX = 1.0
 RELATIONSHIP_STRENGTH_DEFAULT = 1.0
 
+# Spread-activation recall (pattern completion)
+SPREAD_ACTIVATION_SEEDS = 10  # Top vector hits used as activation sources
+SPREAD_ACTIVATION_DEPTH = 2  # Max hops from a seed
+SPREAD_ACTIVATION_HOP_DECAY = 0.7  # Activation multiplier per hop
+RECALL_WEIGHT_SIMILARITY = 0.6  # Final score: direct semantic match
+RECALL_WEIGHT_ACTIVATION = 0.25  # Final score: graph-completed association
+RECALL_WEIGHT_SALIENCE = 0.15  # Final score: memory importance
+
 # Clustering parameters
 MIN_CLUSTER_SIZE = 5
 MIN_SAMPLES = 3

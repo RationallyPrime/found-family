@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, LiteralString, cast
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel, ConfigDict
+
 from memory_palace.core.base import ErrorLevel
 from memory_palace.core.decorators import error_context, with_error_handling
 from memory_palace.core.logging import get_logger
@@ -39,6 +41,22 @@ if TYPE_CHECKING:
     from memory_palace.services import EmbeddingService
 
 logger = get_logger(__name__)
+
+
+class RecallResult(BaseModel):
+    """A recalled memory with its retrieval-score breakdown.
+
+    similarity: direct semantic match to the cue (0 if reached via graph only)
+    activation: strength of graph pattern completion (0 if direct hit only)
+    score: combined ranking score
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    memory: Memory
+    similarity: float = 0.0
+    activation: float = 0.0
+    score: float = 0.0
 
 
 class MemoryService:
@@ -273,6 +291,88 @@ class MemoryService:
             return "SOLVED_BY"
         else:
             return "RELATES_TO"
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def recall(
+        self,
+        query: str,
+        k: int = 10,
+        similarity_threshold: float = 0.7,
+        min_salience: float | None = None,
+        topic_ids: list[int] | None = None,
+        expand: bool = True,
+        reinforce: bool = True,
+    ) -> list[RecallResult]:
+        """Cue-based recall with graph pattern completion.
+
+        1. Vector search: the cue finds direct semantic matches (entry points).
+        2. Spread activation: the strongest entries activate their graph
+           neighborhood through typed edges, strength-weighted per hop.
+        3. Ranking: score = w_sim*similarity + w_act*activation + w_sal*salience.
+        4. Reconsolidation: everything returned gets reinforced.
+        """
+        from memory_palace.core.constants import (
+            RECALL_WEIGHT_ACTIVATION,
+            RECALL_WEIGHT_SALIENCE,
+            RECALL_WEIGHT_SIMILARITY,
+            SPREAD_ACTIVATION_DEPTH,
+            SPREAD_ACTIVATION_HOP_DECAY,
+            SPREAD_ACTIVATION_SEEDS,
+        )
+
+        query_embedding = await self.embeddings.embed_text(query)
+
+        # Stage 1: direct semantic matches, scores preserved
+        hits = await self.memory_repo.recall_scored(
+            embedding=query_embedding,
+            threshold=similarity_threshold,
+            limit=max(k * 3, 30),
+        )
+        logger.debug(f"Recall stage 1: {len(hits)} direct hits")
+
+        pool: dict[UUID, RecallResult] = {m.id: RecallResult(memory=m, similarity=sim) for m, sim in hits}
+
+        # Stage 2: pattern completion from the strongest entry points
+        if expand and hits:
+            seeds = [(m.id, sim) for m, sim in hits[:SPREAD_ACTIVATION_SEEDS]]
+            activated = await self.memory_repo.expand_from_seeds(
+                seeds=seeds,
+                depth=SPREAD_ACTIVATION_DEPTH,
+                hop_decay=SPREAD_ACTIVATION_HOP_DECAY,
+                limit=max(k * 3, 30),
+            )
+            logger.debug(f"Recall stage 2: {len(activated)} graph-activated memories")
+
+            for memory, activation in activated:
+                existing = pool.get(memory.id)
+                if existing is not None:
+                    existing.activation = max(existing.activation, activation)
+                else:
+                    pool[memory.id] = RecallResult(memory=memory, activation=activation)
+
+        # Stage 3: filter and rank
+        results = list(pool.values())
+        if min_salience is not None:
+            results = [r for r in results if getattr(r.memory, "salience", 0.0) >= min_salience]
+        if topic_ids:
+            wanted = set(topic_ids)
+            results = [r for r in results if getattr(r.memory, "topic_id", None) in wanted]
+
+        for r in results:
+            r.score = (
+                RECALL_WEIGHT_SIMILARITY * r.similarity
+                + RECALL_WEIGHT_ACTIVATION * r.activation
+                + RECALL_WEIGHT_SALIENCE * getattr(r.memory, "salience", 0.0)
+            )
+        results.sort(key=lambda r: r.score, reverse=True)
+        results = results[:k]
+
+        # Stage 4: retrieval is reconsolidation
+        if reinforce and results:
+            await self._reinforce_memories([r.memory.id for r in results])
+
+        logger.info(f"Recall complete: {len(results)} memories (pool was {len(pool)})")
+        return results
 
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def _reinforce_memories(self, memory_ids: list[UUID]) -> None:

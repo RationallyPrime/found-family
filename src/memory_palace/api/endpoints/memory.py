@@ -112,14 +112,12 @@ class StoreBatchResponse(BaseModel):
 class SearchRequest(BaseModel):
     """Request model for searching memories."""
 
-    query: str
-    k: int = 10
-    threshold: float = 0.7
+    query: str = Field(..., description="The retrieval cue — what to remember about")
+    k: int = Field(10, description="Maximum memories to return")
+    threshold: float = Field(0.7, description="Minimum semantic similarity for direct matches (0-1)")
 
-    # Enhanced search filters
-    min_salience: float | None = None  # Only return memories above this importance (0.0-1.0)
-    topic_ids: list[int] | None = None
-    ontology_path: list[str] | None = None
+    min_salience: float | None = Field(None, description="Only return memories at least this important (0-1)")
+    topic_ids: list[int] | None = Field(None, description="Restrict to specific topic clusters")
 
 
 class SearchResponse(BaseModel):
@@ -204,18 +202,23 @@ async def recall_memories(
     request: SearchRequest,
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> SearchResponse:
-    """Search and recall relevant memories."""
-    logger.info("Searching memories", extra={"query": request.query, "k": request.k, "threshold": request.threshold})
+    """Recall relevant memories by cue.
 
-    messages = await memory_service.search_memories(
+    Combines direct semantic search with graph pattern completion
+    (memories associated with the direct hits), ranked by a blend of
+    similarity, graph activation, and salience. Recalled memories are
+    reinforced: retrieval strengthens them.
+    """
+    logger.info("Recalling memories", extra={"query": request.query, "k": request.k, "threshold": request.threshold})
+
+    results = await memory_service.recall(
         query=request.query,
-        limit=request.k,  # Map k to limit
-        similarity_threshold=request.threshold,  # Pass threshold to service
+        k=request.k,
+        similarity_threshold=request.threshold,
         min_salience=request.min_salience,
-        topic_id=request.topic_ids[0] if request.topic_ids else None,
+        topic_ids=request.topic_ids,
     )
 
-    # Convert to dict for response
     from memory_palace.domain.models.memories import TopicCluster
 
     role_names = {
@@ -224,11 +227,16 @@ async def recall_memories(
     }
 
     message_dicts = []
-    for msg in messages:
+    for r in results:
+        msg = r.memory
         msg_dict = {
             "id": str(msg.id),
             "timestamp": msg.timestamp.isoformat(),
             "memory_type": msg.memory_type.value,
+            "score": round(r.score, 4),
+            "similarity": round(r.similarity, 4),
+            "activation": round(r.activation, 4),
+            "salience": round(getattr(msg, "salience", 0.0), 4),
         }
 
         if isinstance(msg, TopicCluster):
@@ -241,9 +249,9 @@ async def recall_memories(
 
         message_dicts.append(msg_dict)
 
-    logger.info("Search completed", extra={"result_count": len(messages)})
+    logger.info("Recall completed", extra={"result_count": len(results)})
 
     return SearchResponse(
         messages=message_dicts,
-        count=len(messages),
+        count=len(message_dicts),
     )

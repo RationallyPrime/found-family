@@ -122,6 +122,37 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
+    def spread_activation(depth: int) -> tuple[LiteralString, dict[str, Any]]:
+        """Pattern completion: spread activation from seed memories over typed edges.
+
+        For each seed (a vector-search hit carrying its similarity score),
+        traverses up to `depth` hops over any relationship. Activation along
+        a path = seed_score * PROD(edge strength * hop_decay). Each reached
+        memory keeps its strongest activation across all paths/seeds.
+
+        Args:
+            depth: Max hops (interpolated — Cypher cannot parameterize
+                variable-length bounds; callers pass a trusted constant)
+
+        Params: $seeds (list of {id, score}), $hop_decay, $limit
+        """
+        query = f"""
+            UNWIND $seeds AS seed
+            MATCH (s:Memory {{id: seed.id}})
+            MATCH path = (s)-[*1..{depth}]-(m:Memory)
+            WHERE NOT m:Archived AND m.id <> seed.id
+            WITH m,
+                 max(reduce(a = seed.score,
+                            r IN relationships(path) |
+                            a * coalesce(r.strength, 0.5) * $hop_decay)) AS activation
+            RETURN m, activation
+            ORDER BY activation DESC
+            LIMIT $limit
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
     def reinforce_memories() -> tuple[LiteralString, dict[str, Any]]:
         """Reconsolidation: strengthen memories that were just recalled.
 

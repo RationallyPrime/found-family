@@ -195,6 +195,76 @@ class GenericMemoryRepository[T: GraphModel]:
 class MemoryRepository(GenericMemoryRepository[Memory]):
     """Specialized repository for the Memory discriminated union."""
 
+    @staticmethod
+    def _validate_union_record(node: Any) -> Memory | None:
+        """Validate a Neo4j node mapping into the Memory union.
+
+        Returns None (with a warning) for nodes missing memory_type —
+        legacy debris that predates the discriminated union.
+        """
+        from pydantic import TypeAdapter
+
+        data = dict(node)
+        if "memory_type" not in data:
+            logger.warning("Memory record missing memory_type field", extra={"record_id": data.get("id")})
+            return None
+
+        adapter: TypeAdapter[Memory] = TypeAdapter(Memory)
+        return adapter.validate_python(data)
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def recall_scored(
+        self,
+        embedding: list[float],
+        threshold: float,
+        filters: dict[str, Any] | None = None,
+        limit: int = 100,
+    ) -> list[tuple[Memory, float]]:
+        """Vector search returning (memory, similarity) pairs."""
+        query, params = QueryFactory.build_similarity_search(
+            embedding=embedding, threshold=threshold, limit=limit, filters=filters
+        )
+        result = await self.session.run(cast(LiteralString, query), **params)
+
+        scored: list[tuple[Memory, float]] = []
+        async for record in result:
+            memory = self._validate_union_record(record["m"])
+            if memory is not None:
+                scored.append((memory, record["similarity"]))
+        return scored
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def expand_from_seeds(
+        self,
+        seeds: list[tuple[UUID, float]],
+        depth: int,
+        hop_decay: float,
+        limit: int = 50,
+    ) -> list[tuple[Memory, float]]:
+        """Spread activation from seed memories through the relationship graph.
+
+        Returns (memory, activation) pairs for memories reachable from the
+        seeds, strongest activation first. This is pattern completion: the
+        seeds are cues, the graph completes the memory.
+        """
+        if not seeds:
+            return []
+
+        query, _ = MemoryQueries.spread_activation(depth)
+        result = await self.session.run(
+            query,
+            seeds=[{"id": str(mid), "score": score} for mid, score in seeds],
+            hop_decay=hop_decay,
+            limit=limit,
+        )
+
+        activated: list[tuple[Memory, float]] = []
+        async for record in result:
+            memory = self._validate_union_record(record["m"])
+            if memory is not None:
+                activated.append((memory, record["activation"]))
+        return activated
+
     async def recall_any(
         self,
         filters: dict[str, Any] | None = None,
@@ -229,23 +299,9 @@ class MemoryRepository(GenericMemoryRepository[Memory]):
             memories = []
             async for record in result:
                 # Use the discriminated union to automatically determine type
-                memory_data = record["m"]
-                if "memory_type" in memory_data:
-                    # Use TypeAdapter for discriminated union parsing
-                    from pydantic import TypeAdapter
-
-                    from memory_palace.domain.models.memories import Memory
-
-                    adapter = TypeAdapter(Memory)
-                    # Use Pydantic's validation which will raise ValidationError
-                    # We'll let those bubble up as they indicate data integrity issues
-                    memory = adapter.validate_python(memory_data)
+                memory = self._validate_union_record(record["m"])
+                if memory is not None:
                     memories.append(memory)
-                else:
-                    # Log missing memory_type as a warning
-                    logger.warning(
-                        "Memory record missing memory_type field", extra={"record_id": memory_data.get("id")}
-                    )
 
             logger.debug(f"Recalled {len(memories)} memories of mixed types")
             return memories
