@@ -58,6 +58,7 @@ async def trigger_job(job_id: str, orchestrator: DreamJobOrchestrator = Depends(
         "salience_decay": orchestrator.decay_and_archive,
         "cluster_recent": orchestrator.cluster_recent,
         "nightly_recluster": orchestrator.nightly_recluster,
+        "consolidation": orchestrator.consolidate,
     }
     job = jobs.get(job_id)
     if job is None:

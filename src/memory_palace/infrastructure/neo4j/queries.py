@@ -333,6 +333,75 @@ class DreamJobQueries:
         return cast(LiteralString, query), {}
 
 
+class ConsolidationQueries:
+    """Queries for the episodic → semantic consolidation dream job."""
+
+    @staticmethod
+    def find_conversation_cohorts() -> tuple[LiteralString, dict[str, Any]]:
+        """Un-consolidated episodic memories grouped by conversation.
+
+        Params: $min_cohort, $max_cohorts, $max_cohort_size
+        """
+        query = """
+            MATCH (m:Memory)
+            WHERE (m:FriendUtterance OR m:ClaudeUtterance)
+              AND NOT m:Archived
+              AND coalesce(m.consolidated, false) = false
+              AND m.conversation_id IS NOT NULL
+            WITH m ORDER BY m.timestamp
+            WITH m.conversation_id AS cohort_key, collect({
+                id: m.id, content: m.content, memory_type: m.memory_type,
+                timestamp: m.timestamp, salience: m.salience
+            }) AS episodes
+            WHERE size(episodes) >= $min_cohort
+            RETURN cohort_key, episodes[0..$max_cohort_size] AS episodes
+            ORDER BY size(episodes) DESC
+            LIMIT $max_cohorts
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def find_daily_cohorts() -> tuple[LiteralString, dict[str, Any]]:
+        """Un-consolidated conversation-less memories grouped by UTC day.
+
+        Params: $min_cohort, $max_cohorts, $max_cohort_size
+        """
+        query = """
+            MATCH (m:Memory)
+            WHERE (m:FriendUtterance OR m:ClaudeUtterance)
+              AND NOT m:Archived
+              AND coalesce(m.consolidated, false) = false
+              AND m.conversation_id IS NULL
+            WITH m ORDER BY m.timestamp
+            WITH toString(toInteger(m.timestamp / 86400.0)) AS cohort_key, collect({
+                id: m.id, content: m.content, memory_type: m.memory_type,
+                timestamp: m.timestamp, salience: m.salience
+            }) AS episodes
+            WHERE size(episodes) >= $min_cohort
+            RETURN cohort_key, episodes[0..$max_cohort_size] AS episodes
+            ORDER BY size(episodes) DESC
+            LIMIT $max_cohorts
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def mark_consolidated() -> tuple[LiteralString, dict[str, Any]]:
+        """Flag source episodes as consolidated (still retrievable).
+
+        Params: $ids
+        """
+        query = """
+            UNWIND $ids AS mid
+            MATCH (m:Memory {id: mid})
+            SET m.consolidated = true
+            RETURN count(m) AS marked
+            """
+
+        return cast(LiteralString, query), {}
+
+
 class CacheQueries:
     """Queries for cache management."""
 

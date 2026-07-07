@@ -43,6 +43,8 @@ class DreamJobOrchestrator:
         """Configure the dream jobs with proper scheduling."""
         from memory_palace.core.constants import (
             CLUSTER_RECENT_INTERVAL_HOURS,
+            CONSOLIDATION_HOUR,
+            CONSOLIDATION_MINUTE,
             DECAY_JOB_INTERVAL_HOURS,
             NIGHTLY_RECLUSTER_HOUR,
             NIGHTLY_RECLUSTER_MINUTE,
@@ -72,6 +74,20 @@ class DreamJobOrchestrator:
             id="nightly_recluster",
             max_instances=1,
         )
+
+        from memory_palace.services.consolidation import ConsolidationService
+
+        if ConsolidationService.available():
+            self.scheduler.add_job(
+                self.consolidate,
+                "cron",
+                hour=CONSOLIDATION_HOUR,
+                minute=CONSOLIDATION_MINUTE,
+                id="consolidation",
+                max_instances=1,
+            )
+        else:
+            logger.info("Consolidation job not scheduled: no Anthropic API key configured")
 
     async def start(self):
         self.scheduler.start()
@@ -119,6 +135,17 @@ class DreamJobOrchestrator:
         archived = record["archived"] if record else 0
         if archived > 0:
             logger.info(f"Archived {archived} stale memories (reversible - :Archived label)")
+
+    @with_session()
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
+    async def consolidate(self, session):
+        """Distill un-consolidated episodic cohorts into semantic memories."""
+        from memory_palace.services.consolidation import ConsolidationService
+
+        service = ConsolidationService(session, self.embeddings)
+        created = await service.run()
+        if created:
+            logger.info(f"Dream consolidation created {created} semantic memories")
 
     @with_session()
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)

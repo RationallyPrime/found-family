@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # App config
     debug: bool = True
 
+    # Consolidation dream job (episodic -> semantic distillation)
+    consolidation_model: str = "anthropic:claude-sonnet-5"
+
     # Personalization
     friend_name: str = Field(default="Hákon", description="Name of the person using this Memory Palace")
     friend_pronouns: str | None = Field(default=None, description="Friend's pronouns")

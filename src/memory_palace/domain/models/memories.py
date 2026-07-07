@@ -76,6 +76,26 @@ class SystemNote(SalientMemory):
         return f"SystemNote(type={self.note_type}, content='{self.content[:30]}...')"
 
 
+class Consolidation(SalientMemory):
+    """Semantic memory distilled from a cohort of episodic memories.
+
+    Created by the consolidation dream job: an LLM synthesis of what a
+    group of related episodes meant, written in first person. Linked to
+    its sources via CONSOLIDATED_FROM edges; sources stay retrievable.
+    """
+
+    memory_type: Literal[MemoryType.CONSOLIDATION] = MemoryType.CONSOLIDATION
+    content: str
+    embedding: list[float] | None = None
+    source_ids: list[UUID] = Field(default_factory=list)
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+    conversation_id: UUID | None = None
+
+    def __str__(self) -> str:
+        return f"Consolidation('{self.content[:50]}...', sources={len(self.source_ids)})"
+
+
 class TopicCluster(GraphModel):
     """Discovered topic cluster from clustering."""
 
@@ -112,7 +132,7 @@ class MemoryRelationship(GraphModel):
 
 # The discriminated union - Pydantic routes based on memory_type
 Memory = Annotated[
-    FriendUtterance | ClaudeUtterance | SystemNote | TopicCluster,
+    FriendUtterance | ClaudeUtterance | SystemNote | Consolidation | TopicCluster,
     Field(discriminator="memory_type"),
 ]
 
