@@ -170,8 +170,7 @@ memory-palace/
 ├── scripts/                # Utility and setup scripts
 │   ├── infrastructure/     # Infrastructure setup (Cloudflare, etc.)
 │   └── import_*.py         # Memory import utilities
-├── tests/                  # Test suite
-│   └── test_mcp.py        # MCP integration tests
+├── tests/                  # pytest suite (property + integration tests)
 └── docker-compose*.yml     # Container orchestration
 ```
 

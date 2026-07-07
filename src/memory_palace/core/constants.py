@@ -20,9 +20,8 @@ SIMILARITY_THRESHOLD_HIGH = 0.85
 SIMILARITY_THRESHOLD_VERY_HIGH = 0.9
 SIMILARITY_THRESHOLD_EXTREME = 0.95
 
-# Embedding dimensions
-EMBEDDING_DIMENSIONS_VOYAGE = 1536
-EMBEDDING_DIMENSIONS_OPENAI = 1536
+# Embedding dimensions are model-specific: see
+# VoyageEmbeddingService.get_model_dimensions() (voyage-3 = 1024).
 
 # Time windows and timeouts
 RECENCY_WINDOW_DAYS_DEFAULT = 7

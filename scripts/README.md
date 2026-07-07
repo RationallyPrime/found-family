@@ -41,15 +41,23 @@ uv run python scripts/import_tiered_memories.py
 
 ## Data Management Scripts
 
-### `migrate_memory_types.py`
-Migrate memory data between different formats and update schema versions.
+### `backup_graph.py`
+Dump the entire graph (nodes + relationships, embeddings included) to a
+timestamped JSON file under `data/backups/`. Run before any graph surgery.
 
 **Usage:**
 ```bash
-uv run python scripts/migrate_memory_types.py
+uv run python scripts/backup_graph.py
 ```
 
-**Purpose:** Database schema evolution and data format updates
+### `migrate_legacy_graph.py`
+The Aug-2025 → 2026 schema migration (rescued founding Message nodes,
+unified edges, backfilled lifecycle fields). Idempotent; already run.
+
+**Usage:**
+```bash
+uv run python scripts/migrate_legacy_graph.py --dry-run
+```
 
 ### `review_memories.py`
 Interactive tool to review, audit, and potentially clean up stored memories.
