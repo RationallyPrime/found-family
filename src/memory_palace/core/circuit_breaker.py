@@ -3,7 +3,7 @@
 import time
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 from memory_palace.core.base import ServiceErrorDetails
 from memory_palace.core.errors import RateLimitError, ServiceError, TimeoutError
@@ -22,7 +22,7 @@ class CircuitState(str, Enum):
     HALF_OPEN = "half_open"  # Testing if service recovered
 
 
-class CircuitBreaker(Generic[T]):
+class CircuitBreaker[T]:
     """
     Circuit breaker for handling service failures gracefully.
 

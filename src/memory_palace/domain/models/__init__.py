@@ -1,38 +1,27 @@
-"""Domain models for Memory Palace."""
+"""Domain models for Memory Palace.
 
-from .analysis import (
-    AnalysisType,
-    Entity,
-    MemoryAnalysis,
-    QualityMetrics,
-    SentimentScore,
-    Topic,
+One model universe: the GraphModel base and the Memory discriminated union.
+"""
+
+from .base import GraphModel, MemoryType
+from .embedding import EmbeddingType
+from .memories import (
+    ClaudeUtterance,
+    FriendUtterance,
+    Memory,
+    MemoryRelationship,
+    SystemNote,
+    TopicCluster,
 )
-from .conversation import (
-    ContentType,
-    Conversation,
-    Message,
-    MessageRole,
-)
-from .embedding import EmbeddingType, StoredEmbedding
-from .memory import MemoryChunk
 
 __all__ = [
-    # Analysis
-    "AnalysisType",
-    "ContentType",
-    "Conversation",
-    # Embedding
+    "ClaudeUtterance",
     "EmbeddingType",
-    "Entity",
-    "MemoryAnalysis",
-    # Memory
-    "MemoryChunk",
-    # Conversation
-    "Message",
-    "MessageRole",
-    "QualityMetrics",
-    "SentimentScore",
-    "StoredEmbedding",
-    "Topic",
+    "FriendUtterance",
+    "GraphModel",
+    "Memory",
+    "MemoryRelationship",
+    "MemoryType",
+    "SystemNote",
+    "TopicCluster",
 ]

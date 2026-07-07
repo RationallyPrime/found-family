@@ -5,7 +5,7 @@ with proper connection management and query execution.
 """
 
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
@@ -134,7 +134,7 @@ async def ensure_vector_index(driver: AsyncDriver, dimensions: int = 1024) -> No
             logger.info(f"Created vector index with {dimensions} dimensions")
 
 
-class Neo4jQuery(Generic[T]):
+class Neo4jQuery[T]:
     """Neo4j query executor with typed results.
 
     This class provides methods to execute Cypher queries with

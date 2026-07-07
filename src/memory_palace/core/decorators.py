@@ -4,7 +4,10 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Any, ParamSpec, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
+
+if TYPE_CHECKING:
+    from neo4j import AsyncSession
 
 from .base import ApplicationError, ErrorLevel
 from .error_context import ErrorContextManager
@@ -260,7 +263,11 @@ def handle_error(
     return decorator
 
 
-def with_session(driver_attr: str = "driver") -> Callable[[Callable[P, T]], Callable[P, T]]:
+def with_session(
+    driver_attr: str = "driver",
+) -> (
+    "Callable[[Callable[Concatenate[Any, AsyncSession, P], Awaitable[T]]], Callable[Concatenate[Any, P], Awaitable[T]]]"
+):
     """Decorator to automatically manage Neo4j session lifecycle.
 
     Eliminates duplicated session management code by automatically wrapping
@@ -287,14 +294,11 @@ def with_session(driver_attr: str = "driver") -> Callable[[Callable[P, T]], Call
                 result = await session.run(query, params)
     """
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
+    def decorator(
+        func: "Callable[Concatenate[Any, AsyncSession, P], Awaitable[T]]",
+    ) -> "Callable[Concatenate[Any, P], Awaitable[T]]":
         @wraps(func)
-        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            # Extract self (first argument)
-            if not args:
-                raise ValueError(f"{func.__name__} requires at least 'self' argument")
-
-            self_obj = args[0]
+        async def wrapper(self_obj: Any, /, *args: P.args, **kwargs: P.kwargs) -> T:
             driver = getattr(self_obj, driver_attr, None)
 
             if driver is None:
@@ -305,9 +309,8 @@ def with_session(driver_attr: str = "driver") -> Callable[[Callable[P, T]], Call
 
             # Create session and inject as second argument (after self)
             async with driver.session() as session:
-                new_args = (args[0], session) + args[1:]
-                return await func(*new_args, **kwargs)  # ty: ignore
+                return await func(self_obj, session, *args, **kwargs)
 
-        return cast(Callable[P, T], wrapper)
+        return wrapper
 
     return decorator

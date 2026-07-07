@@ -1,4 +1,4 @@
-from typing import Any, Generic, LiteralString, TypeVar, cast
+from typing import Any, LiteralString, cast
 from uuid import UUID
 
 from neo4j import AsyncSession
@@ -16,10 +16,8 @@ from memory_palace.infrastructure.neo4j.queries import (
 
 logger = get_logger(__name__)
 
-T = TypeVar("T", bound=GraphModel)
 
-
-class GenericMemoryRepository(Generic[T]):
+class GenericMemoryRepository[T: GraphModel]:
     """Generic repository for all memory types using discriminated unions and type safety."""
 
     def __init__(self, session: AsyncSession):

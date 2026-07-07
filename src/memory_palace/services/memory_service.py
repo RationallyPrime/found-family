@@ -27,7 +27,6 @@ from memory_palace.domain.models.memories import (
 from memory_palace.infrastructure.neo4j.queries import (
     MemoryQueries,
 )
-from memory_palace.infrastructure.neo4j.query_builder import CypherQueryBuilder
 from memory_palace.infrastructure.repositories.memory import (
     GenericMemoryRepository,
     MemoryRepository,
@@ -77,8 +76,6 @@ class MemoryService:
         role: str,
         conversation_id: UUID | None = None,
         salience: float | None = None,
-        ontology_path: list[str] | None = None,
-        metadata: dict | None = None,
         auto_classify: bool = True,
     ):
         """Store a single memory message.
@@ -88,8 +85,6 @@ class MemoryService:
             role: Either 'user' or 'assistant'
             conversation_id: Optional conversation UUID
             salience: Importance rating (0.0-1.0)
-            ontology_path: Hierarchical categorization
-            metadata: Additional metadata
             auto_classify: Whether to auto-assign topic clusters
 
         Returns:
@@ -299,134 +294,6 @@ class MemoryService:
         else:
             await self.claude_repo.remember(memory)
 
-    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
-    async def recall_with_graph(
-        self,
-        query: str,
-        k: int = 24,
-        use_ontology_boost: bool = True,
-        expand_depth: int = 2,
-        boost_factor: float = 1.2,  # noqa: ARG002
-    ) -> list[Memory]:
-        """Multi-stage recall with ontology boost and graph expansion.
-
-        Implements MP-009 four-stage recall process.
-        """
-        logger.info(f"Starting multi-stage recall for query: '{query[:50]}...'")
-
-        # Stage 1: Generate query embedding and initial vector search
-        query_embedding = await self.embeddings.embed_text(query)
-        embedding = query_embedding
-
-        # Get broad candidate set using similarity search
-        candidates = await self.memory_repo.recall_any(
-            similarity_search=(embedding, 0.5),  # Lower threshold for broad search
-            limit=64,
-        )
-
-        logger.debug(f"Stage 1: Found {len(candidates)} initial candidates")
-
-        # Stage 2: Ontology boost (predict topic and boost matching memories)
-        if use_ontology_boost and self.clusterer and candidates:
-            try:
-                predicted_topic = await self.clusterer.predict([embedding])
-                topic_id = predicted_topic[0] if predicted_topic[0] != -1 else None
-
-                if topic_id is not None:
-                    logger.debug(f"Stage 2: Predicted topic {topic_id}, applying ontology boost")
-
-                    # Separate topical vs non-topical memories
-                    topical = []
-                    non_topical = []
-
-                    for memory in candidates:
-                        if hasattr(memory, "topic_id") and memory.topic_id == topic_id:
-                            topical.append(memory)
-                        else:
-                            non_topical.append(memory)
-
-                    # Reorder: topical memories first (with boost), then others
-                    candidates = topical + non_topical
-                    logger.debug(f"Stage 2: Boosted {len(topical)} memories from topic {topic_id}")
-
-            except Exception as e:
-                # Log ontology boost failure but continue - it's optional
-                from memory_palace.core.errors import ProcessingError
-
-                # Create error for logging but don't raise (it's optional)
-                error = ProcessingError(
-                    message="Ontology boost failed during recall",
-                    details={
-                        "source": "memory_service",
-                        "operation": "recall_with_graph",
-                        "stage": "ontology_boost",
-                        "error_message": str(e),
-                    },
-                )
-                logger.warning("Stage 2 ontology boost failed", extra={"error": str(error), "details": error.details})
-
-        # Stage 3: Graph expansion (traverse relationships from top candidates)
-        top_candidates = candidates[:10]  # Expand from best candidates only
-        expanded_memories = await self._expand_via_relationships(top_candidates, expand_depth)
-
-        # Add expanded memories to candidate set
-        candidate_ids = {m.id for m in candidates}
-        for expanded in expanded_memories:
-            if expanded.id not in candidate_ids:
-                candidates.append(expanded)
-                candidate_ids.add(expanded.id)
-
-        logger.debug(f"Stage 3: Added {len(expanded_memories)} memories via graph expansion")
-
-        # Stage 4: Re-rank combined set (for now, just use original similarity order)
-        # In a more sophisticated implementation, this would use cross-encoders
-        # or other re-ranking models
-
-        final_results = candidates[:k]
-        logger.info(f"Multi-stage recall complete: returning {len(final_results)} memories")
-
-        return final_results
-
-    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
-    async def _expand_via_relationships(self, seed_memories: list[Memory], depth: int = 2) -> list[Memory]:
-        """
-        Recursively expand a set of seed memories by finding similar memories using vector similarity.
-
-        For each memory in the current set, retrieves a set of similar memories (based on embedding similarity)
-        and adds those not already visited to the expansion set. This process is repeated up to the specified
-        depth, avoiding revisiting memories by tracking their IDs.
-
-        Args:
-            seed_memories (list[Memory]): The initial set of memories to expand from.
-            depth (int): The maximum recursion depth for expansion.
-
-        Returns:
-            list[Memory]: The expanded set of related memories found via vector similarity.
-        """
-        if not seed_memories or depth <= 0:
-            return []
-
-        expanded: list[Memory] = []
-        visited_ids = {m.id for m in seed_memories}
-
-        for seed in seed_memories:
-            if not getattr(seed, "embedding", None):
-                continue
-            similar = await self.memory_repo.recall_any(similarity_search=(seed.embedding, 0.7), limit=5)
-            for memory in similar:
-                if memory.id not in visited_ids and memory.id != seed.id:
-                    expanded.append(memory)
-                    visited_ids.add(memory.id)
-
-        if depth > 1:
-            recursive_expanded = await self._expand_via_relationships(expanded, depth - 1)
-            for memory in recursive_expanded:
-                if memory.id not in visited_ids:
-                    expanded.append(memory)
-                    visited_ids.add(memory.id)
-
-        return expanded
-
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=True)
     async def search_memories(
         self,
@@ -473,90 +340,6 @@ class MemoryService:
 
         logger.info(f"Search returned {len(results)} memories after filtering")
         return results
-
-    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=True)
-    async def recall_with_specifications(
-        self,
-        specifications: list,
-        query: str | None = None,
-        similarity_threshold: float = 0.7,
-        limit: int = 50,
-    ) -> list[Memory]:
-        """Recall memories using powerful specification-based filtering.
-
-        This method allows composing specifications for complex queries:
-        - Combine multiple criteria with AND/OR logic
-        - Filter by salience, topics, conversations, recency, emotions, etc.
-        - Optionally add semantic similarity search
-
-        Args:
-            specifications: List of specification objects to apply
-            query: Optional text query for similarity search
-            similarity_threshold: Minimum similarity score (if query provided)
-            limit: Maximum number of results
-
-        Returns:
-            List of memories matching the specifications
-
-        Example:
-            >>> # Find recent, salient memories from a specific conversation
-            >>> specs = [
-            ...     RecentMemorySpecification(days=7),
-            ...     SalientMemorySpecification(min_salience=0.7),
-            ...     ConversationMemorySpecification(conversation_id),
-            ... ]
-            >>> memories = await service.recall_with_specifications(specs)
-        """
-        # Build Cypher query from specifications
-        filter_conditions: list[str] = []
-        for spec in specifications:
-            if hasattr(spec, "to_cypher"):
-                clause = spec.to_cypher(alias="node")
-                filter_conditions.append(clause)
-
-        filter_clause = " AND ".join(filter_conditions)
-        if filter_clause:
-            filter_clause = "AND " + filter_clause
-
-        if query:
-            query_embedding = await self.embeddings.embed_text(query)
-            cypher_query = f"""
-            CALL db.index.vector.queryNodes('memory_embeddings', $limit, $embedding)
-            YIELD node, score
-            WHERE score > $threshold {filter_clause}
-            RETURN node as m, score as similarity
-            ORDER BY similarity DESC
-            LIMIT $limit
-            """
-            result = await self.run_query(
-                cypher_query,
-                embedding=query_embedding,
-                threshold=similarity_threshold,
-                limit=limit,
-            )
-        else:
-            builder = CypherQueryBuilder()
-            builder.match(lambda p: p.node("Memory", "m"))
-            for spec in specifications:
-                if hasattr(spec, "to_cypher"):
-                    builder.where(spec.to_cypher())
-            builder.return_clause("m")
-            builder.order_by("m.timestamp DESC")
-            builder.limit(limit)
-            query_str, params = builder.build()
-            result = await self.run_query(query_str, **params)
-
-        memories = []
-        async for record in result:
-            memory_data = dict(record["m"])
-            # Use Pydantic's validation - let ValidationError bubble up
-            # as it indicates a data integrity issue that should be addressed
-
-            memory = Memory.model_validate(memory_data)
-            memories.append(memory)
-
-        logger.info(f"Specification-based recall returned {len(memories)} memories")
-        return memories
 
     async def get_conversation_history(self, conversation_id: UUID, limit: int = 100) -> list[Memory]:
         """Get complete conversation history in chronological order."""

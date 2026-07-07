@@ -21,10 +21,6 @@ class StoreMemoryRequest(BaseModel):
     content: str
     role: str = Field(..., pattern="^(user|assistant)$", description="Role: 'user' or 'assistant'")
     conversation_id: UUID | None = None
-    metadata: dict | None = None
-
-    # Incremental ontology support
-    ontology_path: list[str] | None = None
 
     # Memory importance/salience (0.0-1.0 scale)
     # Recalibrated scale (since we only store things worth remembering):
@@ -133,8 +129,6 @@ async def remember_message(
         role=request.role,
         conversation_id=request.conversation_id,
         salience=request.salience,  # Pass through the importance rating
-        ontology_path=request.ontology_path,
-        metadata=request.metadata,
     )
 
     logger.info("Successfully stored memory", extra={"memory_id": str(memory.id)})
@@ -162,8 +156,6 @@ async def remember_batch(
             role=mem_request.role,
             conversation_id=mem_request.conversation_id,
             salience=mem_request.salience,
-            ontology_path=mem_request.ontology_path,
-            metadata=mem_request.metadata,
         )
         memory_ids.append(memory.id)
 
