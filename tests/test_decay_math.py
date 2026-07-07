@@ -32,7 +32,7 @@ days_st = st.floats(min_value=0.0, max_value=3650.0, allow_nan=False)
 def test_decay_bounded(salience: float, days: float):
     """Decay never leaves [floor, salience]."""
     result = decay(salience, days)
-    assert SALIENCE_FLOOR <= result + 1e-12
+    assert result + 1e-12 >= SALIENCE_FLOOR
     assert result <= salience + 1e-12
 
 

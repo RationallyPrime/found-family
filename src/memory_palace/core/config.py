@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # App config
     debug: bool = True
 
+    # OAuth token signing. REQUIRED for the API app: without a stable key,
+    # every issued token silently dies on restart. Scripts don't need it.
+    jwt_secret_key: str = ""
+
     # Embeddings
     voyage_model: str = "voyage-4-large"
 

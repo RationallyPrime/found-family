@@ -418,6 +418,68 @@ class ConsolidationQueries:
         return cast(LiteralString, query), {}
 
 
+class OAuthQueries:
+    """Queries for OAuth state persistence (DCR clients + auth codes).
+
+    Client registrations must survive restarts (claude.ai stores its
+    client_id); auth codes are 10-minute single-use ephemera.
+    """
+
+    @staticmethod
+    def get_client() -> tuple[LiteralString, dict[str, Any]]:
+        """Params: $client_id"""
+        query = """
+            MATCH (c:OAuthClient {client_id: $client_id})
+            RETURN c.data_json AS data_json
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def save_client() -> tuple[LiteralString, dict[str, Any]]:
+        """Params: $client_id, $data_json, $now"""
+        query = """
+            MERGE (c:OAuthClient {client_id: $client_id})
+            ON CREATE SET c.created_at = $now
+            SET c.data_json = $data_json, c.updated_at = $now
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def save_auth_code() -> tuple[LiteralString, dict[str, Any]]:
+        """Store a code and opportunistically purge expired ones.
+
+        Params: $code, $data_json, $expires_at, $now
+        """
+        query = """
+            OPTIONAL MATCH (stale:OAuthCode)
+            WHERE stale.expires_at < $now
+            DETACH DELETE stale
+            WITH count(*) AS _
+            CREATE (c:OAuthCode {code: $code, data_json: $data_json, expires_at: $expires_at})
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def consume_auth_code() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically fetch-and-delete a code (single use).
+
+        Returns data_json and whether it was still valid at $now.
+
+        Params: $code, $now
+        """
+        query = """
+            MATCH (c:OAuthCode {code: $code})
+            WITH c, c.data_json AS data_json, c.expires_at >= $now AS valid
+            DETACH DELETE c
+            RETURN data_json, valid
+            """
+
+        return cast(LiteralString, query), {}
+
+
 class CacheQueries:
     """Queries for the Neo4j-backed embedding cache."""
 

@@ -1,41 +1,52 @@
-"""OAuth endpoints for Claude.ai MCP authentication."""
+"""OAuth endpoints for Claude.ai MCP authentication.
+
+Clients register via Dynamic Client Registration (RFC 7591); registrations
+persist in Neo4j (OAuthStateStore) so claude.ai's stored client_id survives
+restarts. Authorization codes are single-use, PKCE-bound, 10-minute TTL.
+"""
 
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
 
 import logfire
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger
+from memory_palace.infrastructure.oauth import OAuthStateStore
 
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["oauth"])
 
-# Store for dynamically registered clients (in production, use a database)
-registered_clients = {}
-
-# Store for authorization codes (in production, use Redis or database)
-auth_codes = {}
-
 # OAuth configuration
 CLIENT_ID = "claude"
-CLIENT_SECRET = os.getenv("CLAUDE_API_KEY", secrets.token_urlsafe(32))
 REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback"
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
+AUTH_CODE_TTL_SECONDS = 600
 
-if not os.getenv("JWT_SECRET_KEY"):
-    logger.error(
-        "JWT_SECRET_KEY is not set — using an ephemeral signing key. "
-        "ALL issued tokens (including 90-day refresh tokens) will be "
-        "silently invalidated on every restart. Set JWT_SECRET_KEY in .env."
+# The signing key is REQUIRED: an ephemeral fallback would silently
+# invalidate every issued token (incl. 90-day refresh tokens) on each
+# restart. Fail the app at import, loudly, rather than degrade quietly.
+SECRET_KEY = settings.jwt_secret_key or os.getenv("JWT_SECRET_KEY", "")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET_KEY is not configured. Set it in .env — generate one with: "
+        'python3 -c "import secrets; print(secrets.token_urlsafe(48))"'
     )
+
+
+def get_oauth_store(request: Request) -> OAuthStateStore:
+    """Resolve the OAuth state store from app state (set at lifespan startup)."""
+    store = getattr(request.app.state, "oauth_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth store not initialized")
+    return store
 
 
 class TokenResponse(BaseModel):
@@ -199,7 +210,7 @@ async def oauth_protected_resource(request: Request):
 
 
 @router.post("/oauth/register", response_model=ClientRegistrationResponse, operation_id="register")
-async def register_client(request: ClientRegistrationRequest):
+async def register_client(request: ClientRegistrationRequest, store: OAuthStateStore = Depends(get_oauth_store)):
     """Dynamic Client Registration endpoint (RFC 7591)."""
     import time
 
@@ -207,15 +218,18 @@ async def register_client(request: ClientRegistrationRequest):
     client_id = f"client_{secrets.token_urlsafe(16)}"
     client_secret = secrets.token_urlsafe(32)
 
-    # Store the registered client
-    registered_clients[client_id] = {
-        "client_secret": client_secret,
-        "client_name": request.client_name,
-        "redirect_uris": request.redirect_uris,
-        "grant_types": request.grant_types or ["authorization_code"],
-        "response_types": request.response_types or ["code"],
-        "scope": request.scope or "read write",
-    }
+    # Persist the registered client (survives restarts)
+    await store.save_client(
+        client_id,
+        {
+            "client_secret": client_secret,
+            "client_name": request.client_name,
+            "redirect_uris": request.redirect_uris,
+            "grant_types": request.grant_types or ["authorization_code"],
+            "response_types": request.response_types or ["code"],
+            "scope": request.scope or "read write",
+        },
+    )
 
     return ClientRegistrationResponse(
         client_id=client_id,
@@ -241,10 +255,17 @@ async def authorize(
     state: str | None = None,
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
+    store: OAuthStateStore = Depends(get_oauth_store),
 ):
-    """OAuth authorization endpoint - supports dynamic clients."""
+    """OAuth authorization endpoint.
 
-    # Structured logging for OAuth flow debugging
+    Requires prior Dynamic Client Registration — no auto-registration
+    shortcuts — and the redirect_uri must match one registered by the
+    client. Auto-approves for registered clients (single-user service,
+    no consent screen), which is safe precisely BECAUSE the redirect_uri
+    is pinned: a code can only ever be sent to a URI the real client
+    registered.
+    """
     logger.info(
         "OAuth authorization request",
         client_id=client_id,
@@ -257,36 +278,35 @@ async def authorize(
     if response_type != "code":
         raise HTTPException(status_code=400, detail="Unsupported response_type")
 
-    # Validate client exists (either registered or known)
-    if client_id not in registered_clients and not client_id.startswith("client_"):
-        logger.warning(f"Unknown client_id: {client_id}")
-        # Auto-register Claude if needed
-        if "claude" in client_id.lower():
-            registered_clients[client_id] = {
-                "client_secret": secrets.token_urlsafe(32),
-                "client_name": "Claude",
-                "redirect_uris": [redirect_uri],
-                "grant_types": ["authorization_code"],
-                "response_types": ["code"],
-                "scope": scope,
-            }
-            logger.info(f"Auto-registered Claude client: {client_id}")
+    client = await store.get_client(client_id)
+    if client is None:
+        logger.warning(f"Authorization attempt by unregistered client: {client_id}")
+        raise HTTPException(status_code=400, detail="Unknown client_id — register via /oauth/register first")
 
-    # Auto-approve for Claude (no consent screen)
+    if redirect_uri not in client.get("redirect_uris", []):
+        logger.warning(
+            "redirect_uri not registered for client",
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+        )
+        raise HTTPException(status_code=400, detail="redirect_uri does not match any registered URI")
+
+    # Auto-approve for the registered client (no consent screen)
     auth_code = secrets.token_urlsafe(32)
 
-    # Store auth code (in production, use Redis or database)
-    code_data = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": scope,
-        "exp": datetime.now(UTC) + timedelta(minutes=10),
-        # PKCE (RFC 7636): bind the code to the challenge so only the
-        # client holding the verifier can redeem it.
-        "code_challenge": code_challenge,
-        "code_challenge_method": (code_challenge_method or "S256") if code_challenge else None,
-    }
-    auth_codes[auth_code] = code_data
+    await store.save_auth_code(
+        auth_code,
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": scope,
+            # PKCE (RFC 7636): bind the code to the challenge so only the
+            # client holding the verifier can redeem it.
+            "code_challenge": code_challenge,
+            "code_challenge_method": (code_challenge_method or "S256") if code_challenge else None,
+        },
+        ttl_seconds=AUTH_CODE_TTL_SECONDS,
+    )
     logger.info(f"Stored auth code for client {client_id}")
 
     # Build redirect URL
@@ -332,6 +352,7 @@ async def token(
     client_secret: str = Form(None),  # Public clients (Claude.ai DCR) don't send one  # noqa: ARG001
     code_verifier: str | None = Form(None),
     refresh_token: str | None = Form(None),
+    store: OAuthStateStore = Depends(get_oauth_store),
 ):
     """OAuth token endpoint - supports dynamic clients with enforced PKCE."""
 
@@ -341,29 +362,20 @@ async def token(
         if not code:
             raise HTTPException(status_code=400, detail="Missing authorization code")
 
-        # Validate the authorization code
-        if code not in auth_codes:
-            logger.warning(f"Invalid authorization code: {code[:20]}...")
-            raise HTTPException(status_code=400, detail="Invalid authorization code")
-
-        code_data = auth_codes[code]
-
-        # Check if code is expired
-        if datetime.now(UTC) > code_data["exp"]:
-            logger.warning("Authorization code expired")
-            del auth_codes[code]
-            raise HTTPException(status_code=400, detail="Authorization code expired")
+        # Consume the code: single-use, expiry checked by the store
+        code_data = await store.consume_auth_code(code)
+        if code_data is None:
+            logger.warning(f"Invalid or expired authorization code: {code[:20]}...")
+            raise HTTPException(status_code=400, detail="Invalid or expired authorization code")
 
         # Validate client_id matches
         if code_data["client_id"] != client_id:
             logger.warning(f"Client ID mismatch: {client_id} != {code_data['client_id']}")
             raise HTTPException(status_code=400, detail="Client ID mismatch")
 
-        # Enforce PKCE binding before consuming the code
+        # Enforce PKCE binding
         _verify_pkce(code_data, code_verifier)
 
-        # Remove used code
-        del auth_codes[code]
         logger.info(f"Authorization code validated and consumed for client {client_id}")
 
     elif grant_type == "refresh_token":

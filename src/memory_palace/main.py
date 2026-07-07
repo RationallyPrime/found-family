@@ -94,6 +94,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         dependencies.embedding_service = embedding_service
         dependencies.clustering_service = clustering_service
 
+        # OAuth state store (client registrations survive restarts)
+        from memory_palace.infrastructure.oauth import Neo4jOAuthStateStore
+
+        _app.state.oauth_store = Neo4jOAuthStateStore(neo4j_driver)
+
         # Note: We'll create sessions per-request, not hold one open
         logger.info("💾 Services initialized and ready...")
 
