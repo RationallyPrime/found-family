@@ -30,6 +30,13 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
+if not os.getenv("JWT_SECRET_KEY"):
+    logger.error(
+        "JWT_SECRET_KEY is not set — using an ephemeral signing key. "
+        "ALL issued tokens (including 90-day refresh tokens) will be "
+        "silently invalidated on every restart. Set JWT_SECRET_KEY in .env."
+    )
+
 
 class TokenResponse(BaseModel):
     """OAuth token response."""
@@ -233,7 +240,7 @@ async def authorize(
     scope: str = "read write",
     state: str | None = None,
     code_challenge: str | None = None,
-    code_challenge_method: str | None = None,  # noqa: ARG001
+    code_challenge_method: str | None = None,
 ):
     """OAuth authorization endpoint - supports dynamic clients."""
 
@@ -274,6 +281,10 @@ async def authorize(
         "redirect_uri": redirect_uri,
         "scope": scope,
         "exp": datetime.now(UTC) + timedelta(minutes=10),
+        # PKCE (RFC 7636): bind the code to the challenge so only the
+        # client holding the verifier can redeem it.
+        "code_challenge": code_challenge,
+        "code_challenge_method": (code_challenge_method or "S256") if code_challenge else None,
     }
     auth_codes[auth_code] = code_data
     logger.info(f"Stored auth code for client {client_id}")
@@ -287,18 +298,43 @@ async def authorize(
     return RedirectResponse(url=redirect_url)
 
 
+def _verify_pkce(code_data: dict, code_verifier: str | None) -> None:
+    """Enforce PKCE (RFC 7636) when the auth code was bound to a challenge."""
+    challenge = code_data.get("code_challenge")
+    if not challenge:
+        return  # Code was issued without PKCE; nothing to enforce.
+
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="code_verifier required (PKCE)")
+
+    method = code_data.get("code_challenge_method") or "S256"
+    if method == "S256":
+        import base64
+        import hashlib
+
+        digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+        computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    elif method == "plain":
+        computed = code_verifier
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported code_challenge_method: {method}")
+
+    if not secrets.compare_digest(computed, challenge):
+        logger.warning("PKCE verification failed")
+        raise HTTPException(status_code=400, detail="PKCE verification failed")
+
+
 @router.post("/oauth/token", response_model=TokenResponse, operation_id="token")
 async def token(
     grant_type: str = Form(...),
     code: str | None = Form(None),
     client_id: str = Form(...),
-    client_secret: str = Form(None),  # Make optional for open access  # noqa: ARG001
+    client_secret: str = Form(None),  # Public clients (Claude.ai DCR) don't send one  # noqa: ARG001
+    code_verifier: str | None = Form(None),
     refresh_token: str | None = Form(None),
 ):
-    """OAuth token endpoint - supports dynamic clients."""
+    """OAuth token endpoint - supports dynamic clients with enforced PKCE."""
 
-    # Accept any client for now (Claude uses dynamic registration)
-    # In production, validate against persistent store
     logger.info(f"OAuth token request from client: {client_id}")
 
     if grant_type == "authorization_code":
@@ -322,6 +358,9 @@ async def token(
         if code_data["client_id"] != client_id:
             logger.warning(f"Client ID mismatch: {client_id} != {code_data['client_id']}")
             raise HTTPException(status_code=400, detail="Client ID mismatch")
+
+        # Enforce PKCE binding before consuming the code
+        _verify_pkce(code_data, code_verifier)
 
         # Remove used code
         del auth_codes[code]

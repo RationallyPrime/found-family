@@ -12,12 +12,13 @@ from contextlib import asynccontextmanager
 
 import logfire
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_mcp import FastApiMCP
+from fastapi_mcp import AuthConfig, FastApiMCP
 from neo4j import AsyncDriver
 
 from memory_palace.api import dependencies
+from memory_palace.api.auth import require_remote_auth
 from memory_palace.api.endpoints import admin, core, memory, oauth
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.infrastructure.embeddings.factory import (
@@ -113,13 +114,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         logger.info("✅ Memory Palace application started successfully!")
         logger.info("🔄 Background memory management is now active")
 
-        # Print job status
-        # if dream_orchestrator:
-        #     status = dream_orchestrator.get_job_status()
-        #     logger.info(f"📅 Scheduled jobs: {len(status['jobs'])}")
-        #     for job in status['jobs']:
-        #         logger.info(f"   - {job['id']}: next run at {job['next_run']}")
-
         yield  # Application is running
 
     except Exception as e:
@@ -145,7 +139,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
         if neo4j_driver:
             logger.info("📊 Closing Neo4j connection...")
-            # await neo4j_driver.close()
+            await neo4j_driver.close()
             logger.info("✅ Neo4j connection closed")
 
         logger.info("✅ Memory Palace shutdown complete")
@@ -162,19 +156,24 @@ app = FastAPI(
 # Enable FastAPI instrumentation for request tracing
 logfire.instrument_fastapi(app)
 
-# Add CORS middleware
+# Add CORS middleware. Wildcard origins + credentials is a spec-invalid
+# combination browsers reject; MCP clients are not browsers and ignore CORS,
+# so this only needs to cover actual browser frontends.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount API routers
-app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
+# Mount API routers.
+# Memory and admin routes are gated: requests arriving through the
+# Cloudflare tunnel must carry a valid Bearer JWT; local traffic is trusted.
+# OAuth/well-known and health stay public — the flow needs them.
+app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"], dependencies=[Depends(require_remote_auth)])
 app.include_router(core.router)
-app.include_router(admin.router)
+app.include_router(admin.router, dependencies=[Depends(require_remote_auth)])
 app.include_router(oauth.router)  # Include OAuth endpoints for Claude.ai MCP
 
 # Add MCP support — expose only the memory verbs as tools.
@@ -195,6 +194,11 @@ mcp = FastApiMCP(
         "trigger",
         "cache_stats",
     ],
+    # Same gate as the REST routers: tunnel traffic needs a Bearer JWT.
+    # Internal tool execution forwards only the Authorization header
+    # (fastapi-mcp allowlist), never the tunnel headers, so tool calls
+    # authenticated at /mcp pass through cleanly.
+    auth_config=AuthConfig(dependencies=[Depends(require_remote_auth)]),
 )
 mcp.mount_http()  # Creates MCP server at /mcp with HTTPS support
 
