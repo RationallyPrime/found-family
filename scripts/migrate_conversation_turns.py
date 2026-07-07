@@ -10,7 +10,6 @@ This script:
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from neo4j import AsyncGraphDatabase
+
 from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger
 

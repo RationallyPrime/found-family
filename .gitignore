@@ -69,3 +69,9 @@ friendship_memories/
 *.conversation.txt
 *.memory.json
 convo.txt
+
+# Graph backups (contain personal memory content - never commit)
+data/
+
+# Repomix output
+repomix-output.xml

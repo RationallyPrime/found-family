@@ -197,23 +197,37 @@ async def recall_memories(
     # Convert to dict for response
     message_dicts = []
     for msg in messages:
+        # Handle different memory types - some have content, others have different fields
+        from memory_palace.domain.models.memories import OntologyNode, TopicCluster
+
         msg_dict = {
             "id": str(msg.id),
-            "content": msg.content,
             "timestamp": msg.timestamp.isoformat(),
             "memory_type": msg.memory_type.value,
         }
-        # Add role based on memory type with personalized names
-        if msg.memory_type.value == "friend_utterance":
-            msg_dict["role"] = settings.friend_name
-        elif msg.memory_type.value == "claude_utterance":
-            msg_dict["role"] = settings.claude_name
-        elif msg.memory_type.value == "user_utterance":  # Legacy support
-            msg_dict["role"] = settings.friend_name
-        elif msg.memory_type.value == "assistant_utterance":  # Legacy support
-            msg_dict["role"] = settings.claude_name
+
+        # Add content/label/name based on memory type
+        if isinstance(msg, TopicCluster):
+            msg_dict["content"] = msg.label or f"Topic Cluster {msg.cluster_id}"
+            msg_dict["role"] = "topic_cluster"
+        elif isinstance(msg, OntologyNode):
+            msg_dict["content"] = msg.definition or msg.name
+            msg_dict["role"] = "ontology_node"
         else:
-            msg_dict["role"] = msg.memory_type.value
+            # FriendUtterance, ClaudeUtterance, SystemNote have .content
+            msg_dict["content"] = msg.content  # type: ignore
+
+            # Add role based on memory type with personalized names
+            if msg.memory_type.value == "friend_utterance":
+                msg_dict["role"] = settings.friend_name
+            elif msg.memory_type.value == "claude_utterance":
+                msg_dict["role"] = settings.claude_name
+            elif msg.memory_type.value == "user_utterance":  # Legacy support
+                msg_dict["role"] = settings.friend_name
+            elif msg.memory_type.value == "assistant_utterance":  # Legacy support
+                msg_dict["role"] = settings.claude_name
+            else:
+                msg_dict["role"] = msg.memory_type.value
 
         message_dicts.append(msg_dict)
 

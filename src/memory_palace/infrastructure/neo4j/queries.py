@@ -372,6 +372,25 @@ class DreamJobQueries:
         return builder.build()
 
 
+class CacheQueries:
+    """Queries for cache management."""
+
+    @staticmethod
+    def get_cache_stats() -> tuple[LiteralString, dict[str, Any]]:
+        """Get statistics about the embedding cache.
+
+        Returns:
+            Tuple of (query, params)
+        """
+        query = """
+            MATCH (e:EmbeddingCache)
+            RETURN count(e) AS size,
+                   sum(coalesce(e.hit_count, 0)) AS total_hits
+            """
+
+        return cast(LiteralString, query), {}
+
+
 class VectorIndexQueries:
     """Queries for managing Neo4j vector indexes."""
 

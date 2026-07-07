@@ -78,14 +78,12 @@ async def trigger_job(job_id: str, orchestrator: DreamJobOrchestrator = Depends(
 @router.get("/cache/stats", operation_id="cache_stats")
 async def get_cache_stats(driver: AsyncDriver = Depends(get_neo4j_driver)):
     """Get basic statistics about the embedding cache."""
+    from memory_palace.infrastructure.neo4j.queries import CacheQueries
+
+    query, params = CacheQueries.get_cache_stats()
+
     async with driver.session() as session:
-        result = await session.run(
-            """
-            MATCH (e:EmbeddingCache)
-            RETURN count(e) AS size,
-                   sum(coalesce(e.hit_count,0)) AS total_hits
-            """
-        )
+        result = await session.run(query, params)
         record = await result.single()
         if record is None:
             return {"size": 0, "total_hits": 0}

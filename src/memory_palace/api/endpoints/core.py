@@ -1,5 +1,7 @@
 """Core API endpoints for Memory Palace."""
 
+from datetime import UTC
+
 from fastapi import APIRouter
 
 from memory_palace.core.logging import get_logger
@@ -29,4 +31,6 @@ async def root():
 @router.get("/health", operation_id="health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "timestamp": "2025-08-07T15:20:00Z"}
+    from datetime import datetime
+
+    return {"status": "healthy", "timestamp": datetime.now(UTC).isoformat()}

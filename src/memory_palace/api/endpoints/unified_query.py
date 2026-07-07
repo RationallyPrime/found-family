@@ -125,25 +125,30 @@ def parse_order_by(order_by_str: str) -> tuple[str | None, str, str] | None:
     return None
 
 
-def build_specification(filter_spec: MemorySpecification):
+def build_specification(filter_spec: MemorySpecification) -> MemorySpecification:
     """Build composite specifications if needed.
 
     Since specifications are already Pydantic models, we just need to handle
     the CompositeSpecification case where we need to combine multiple specs.
     """
     if isinstance(filter_spec, CompositeSpecification):
-        # Recursively build composite specifications
-        sub_specs = [build_specification(spec) for spec in filter_spec.specifications]
+        # Recursively build composite specifications - cast to proper type
+        from typing import cast
+
+        # Cast each spec from BaseSpecification to MemorySpecification before recursing
+        sub_specs: list[MemorySpecification] = [
+            build_specification(cast(MemorySpecification, spec)) for spec in filter_spec.specifications
+        ]
 
         if filter_spec.operator == "and":
             spec = sub_specs[0]
             for s in sub_specs[1:]:
-                spec = spec.and_(s)  # Use the and_ method
+                spec = cast(MemorySpecification, spec.and_(s))  # Cast the result
             return spec
         else:  # "or"
             spec = sub_specs[0]
             for s in sub_specs[1:]:
-                spec = spec.or_(s)  # Use the or_ method
+                spec = cast(MemorySpecification, spec.or_(s))  # Cast the result
             return spec
 
     # For all other specifications, they're already ready to use
@@ -384,6 +389,8 @@ async def execute_unified_query(
                 service_name="memory_palace",
                 endpoint="/api/v1/unified_query",
                 status_code=500,
+                request_id=None,  # Explicitly set optional fields for pyright
+                latency_ms=None,
             ),
         )
         raise HTTPException(status_code=500, detail=str(error)) from e
