@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -26,14 +26,12 @@ class DreamJobOrchestrator:
         clusterer: "ClusteringService",
         decay_lambda: float | None = None,
     ):
-        from memory_palace.core.constants import SALIENCE_DECAY_FACTOR_DEFAULT
+        from memory_palace.core.constants import SALIENCE_DECAY_LAMBDA_PER_DAY
 
         self.driver = driver
         self.embeddings = embeddings
         self.clusterer = clusterer
-        if decay_lambda is None:
-            decay_lambda = SALIENCE_DECAY_FACTOR_DEFAULT
-        self.decay_factor = 1 - decay_lambda  # Convert to decay factor
+        self.decay_lambda = decay_lambda if decay_lambda is not None else SALIENCE_DECAY_LAMBDA_PER_DAY
         self.scheduler = AsyncIOScheduler()
         self._setup_jobs()
 
@@ -45,16 +43,16 @@ class DreamJobOrchestrator:
         """Configure the dream jobs with proper scheduling."""
         from memory_palace.core.constants import (
             CLUSTER_RECENT_INTERVAL_HOURS,
+            DECAY_JOB_INTERVAL_HOURS,
             NIGHTLY_RECLUSTER_HOUR,
             NIGHTLY_RECLUSTER_MINUTE,
-            SALIENCE_REFRESH_INTERVAL_MINUTES,
         )
 
         self.scheduler.add_job(
-            self.refresh_salience,
+            self.decay_and_archive,
             "interval",
-            minutes=SALIENCE_REFRESH_INTERVAL_MINUTES,
-            id="salience_refresh",
+            hours=DECAY_JOB_INTERVAL_HOURS,
+            id="salience_decay",
             max_instances=1,
             coalesce=True,
         )
@@ -85,31 +83,48 @@ class DreamJobOrchestrator:
 
     @with_session()
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
-    async def refresh_salience(self, session):
-        """Update salience with exponential decay and evict low-salience memories."""
-        # Use centralized query
-        query, _ = DreamJobQueries.refresh_salience()
+    async def decay_and_archive(self, session):
+        """Decay salience by elapsed time, then archive stale memories.
+
+        Decay is anchored on each memory's salience_updated_at, so this job
+        is idempotent with respect to wall-clock time. Archival adds the
+        :Archived label — nothing is ever deleted.
+        """
+        from memory_palace.core.constants import (
+            ARCHIVE_SALIENCE_THRESHOLD,
+            ARCHIVE_UNACCESSED_DAYS,
+            SALIENCE_FLOOR,
+        )
+
+        now = datetime.now(UTC).timestamp()
+
+        query, _ = DreamJobQueries.decay_salience()
         result = await session.run(
             query,
-            decay_factor=self.decay_factor,
+            {"now": now, "decay_lambda": self.decay_lambda, "floor": SALIENCE_FLOOR},
         )
         record = await result.single()
         updated = record["updated"] if record else 0
-        logger.info(f"Applied salience decay to {updated} memories")
+        logger.info(f"Applied elapsed-time salience decay to {updated} memories")
 
-        # Use centralized query for eviction
-        query, _ = DreamJobQueries.evict_low_salience()
-        result = await session.run(query)
+        query, _ = DreamJobQueries.archive_stale_memories()
+        result = await session.run(
+            query,
+            {
+                "threshold": ARCHIVE_SALIENCE_THRESHOLD,
+                "cutoff": now - ARCHIVE_UNACCESSED_DAYS * 86400,
+            },
+        )
         record = await result.single()
-        evicted = record["evicted"] if record else 0
-        if evicted > 0:
-            logger.info(f"Evicted {evicted} low-salience memories")
+        archived = record["archived"] if record else 0
+        if archived > 0:
+            logger.info(f"Archived {archived} stale memories (reversible - :Archived label)")
 
     @with_session()
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
     async def cluster_recent(self, session):
         """Assign clusters to recent unassigned memories."""
-        cutoff = datetime.now().timestamp() - 86400
+        cutoff = datetime.now(UTC).timestamp() - 86400
         # Use centralized query
         query, _ = DreamJobQueries.find_unassigned_memories()
         result = await session.run(

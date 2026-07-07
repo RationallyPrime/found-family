@@ -37,6 +37,27 @@ class StoreMemoryRequest(BaseModel):
         description="Memory importance (0-1). Default 0.3. Use: 0.3=regular, 0.6=useful, 0.8=important, 1.0=critical. Must be a number",
     )
 
+    emotional_valence: float = Field(
+        0.0,
+        ge=-1.0,
+        le=1.0,
+        description="Emotional tone of this memory: -1.0 (painful/negative) to 1.0 (joyful/positive). 0.0 = neutral.",
+    )
+    emotional_intensity: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Emotional strength (0-1). High intensity slows forgetting and prioritizes consolidation.",
+    )
+    pinned: bool = Field(
+        False,
+        description="Pinned memories never decay or get archived. Reserve for identity anchors and defining moments.",
+    )
+    source: str | None = Field(
+        None,
+        description="Which interface is writing this memory (e.g. 'claude.ai', 'claude-code').",
+    )
+
     @field_validator("salience", mode="before")
     @classmethod
     def validate_salience(cls, v):
@@ -128,7 +149,11 @@ async def remember_message(
         content=request.content,
         role=request.role,
         conversation_id=request.conversation_id,
-        salience=request.salience,  # Pass through the importance rating
+        salience=request.salience,
+        emotional_valence=request.emotional_valence,
+        emotional_intensity=request.emotional_intensity,
+        pinned=request.pinned,
+        source=request.source,
     )
 
     logger.info("Successfully stored memory", extra={"memory_id": str(memory.id)})
@@ -156,6 +181,10 @@ async def remember_batch(
             role=mem_request.role,
             conversation_id=mem_request.conversation_id,
             salience=mem_request.salience,
+            emotional_valence=mem_request.emotional_valence,
+            emotional_intensity=mem_request.emotional_intensity,
+            pinned=mem_request.pinned,
+            source=mem_request.source,
         )
         memory_ids.append(memory.id)
 
@@ -187,39 +216,28 @@ async def recall_memories(
     )
 
     # Convert to dict for response
+    from memory_palace.domain.models.memories import TopicCluster
+
+    role_names = {
+        "friend_utterance": settings.friend_name,
+        "claude_utterance": settings.claude_name,
+    }
+
     message_dicts = []
     for msg in messages:
-        # Handle different memory types - some have content, others have different fields
-        from memory_palace.domain.models.memories import OntologyNode, TopicCluster
-
         msg_dict = {
             "id": str(msg.id),
             "timestamp": msg.timestamp.isoformat(),
             "memory_type": msg.memory_type.value,
         }
 
-        # Add content/label/name based on memory type
         if isinstance(msg, TopicCluster):
             msg_dict["content"] = msg.label or f"Topic Cluster {msg.cluster_id}"
             msg_dict["role"] = "topic_cluster"
-        elif isinstance(msg, OntologyNode):
-            msg_dict["content"] = msg.definition or msg.name
-            msg_dict["role"] = "ontology_node"
         else:
             # FriendUtterance, ClaudeUtterance, SystemNote have .content
-            msg_dict["content"] = msg.content  # type: ignore
-
-            # Add role based on memory type with personalized names
-            if msg.memory_type.value == "friend_utterance":
-                msg_dict["role"] = settings.friend_name
-            elif msg.memory_type.value == "claude_utterance":
-                msg_dict["role"] = settings.claude_name
-            elif msg.memory_type.value == "user_utterance":  # Legacy support
-                msg_dict["role"] = settings.friend_name
-            elif msg.memory_type.value == "assistant_utterance":  # Legacy support
-                msg_dict["role"] = settings.claude_name
-            else:
-                msg_dict["role"] = msg.memory_type.value
+            msg_dict["content"] = msg.content
+            msg_dict["role"] = role_names.get(msg.memory_type.value, msg.memory_type.value)
 
         message_dicts.append(msg_dict)
 

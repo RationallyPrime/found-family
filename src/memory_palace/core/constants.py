@@ -4,12 +4,15 @@ This module contains all magic numbers and configuration constants
 used throughout the application to avoid duplication and ensure consistency.
 """
 
-# Salience thresholds and defaults
+# Salience lifecycle
 SALIENCE_MIN = 0.0
 SALIENCE_MAX = 1.0
 SALIENCE_DEFAULT = 0.3  # Default salience for new memories
-SALIENCE_EVICTION_THRESHOLD = 0.05  # Memories below this are evicted
-SALIENCE_DECAY_FACTOR_DEFAULT = 0.0154  # 45-day half-life
+SALIENCE_FLOOR = 0.05  # Decay asymptote; unpinned salience never drops below this
+SALIENCE_DECAY_LAMBDA_PER_DAY = 0.0154  # ln(2)/45: 45-day half-life, applied per elapsed day
+SALIENCE_REINFORCEMENT_RATE = 0.1  # Recall boost: salience += (1 - salience) * rate
+ARCHIVE_SALIENCE_THRESHOLD = 0.1  # Below this (and long-unaccessed) memories are archived
+ARCHIVE_UNACCESSED_DAYS = 90  # Minimum days without access before archival
 
 # Similarity search parameters
 SIMILARITY_THRESHOLD_DEFAULT = 0.7
@@ -51,7 +54,9 @@ TOPIC_COHERENCE_MIN = 0.0
 TOPIC_COHERENCE_MAX = 1.0
 
 # Dream job intervals
-SALIENCE_REFRESH_INTERVAL_MINUTES = 5
+# Decay math is elapsed-time based (idempotent w.r.t. wall clock), so the
+# cadence only controls how fresh the stored salience values are.
+DECAY_JOB_INTERVAL_HOURS = 6
 CLUSTER_RECENT_INTERVAL_HOURS = 1
 NIGHTLY_RECLUSTER_HOUR = 3
 NIGHTLY_RECLUSTER_MINUTE = 0

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from neo4j import AsyncDriver
 from pydantic import BaseModel
 
+from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 
@@ -40,39 +41,30 @@ async def get_neo4j_driver():
 
 
 @router.get("/jobs/status", response_model=JobStatusResponse, operation_id="job_status")
+@with_error_handling(reraise=True)
 async def get_job_status(orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)):
     """Get dream job orchestrator status."""
-    try:
-        status = orchestrator.get_job_status()
-        return JobStatusResponse(
-            scheduler_running=status["scheduler_running"], active_jobs=len(status["jobs"]), jobs=status["jobs"]
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to get job status: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    status = orchestrator.get_job_status()
+    return JobStatusResponse(
+        scheduler_running=status["scheduler_running"], active_jobs=len(status["jobs"]), jobs=status["jobs"]
+    )
 
 
 @router.post("/jobs/trigger/{job_id}", operation_id="trigger")
+@with_error_handling(reraise=True)
 async def trigger_job(job_id: str, orchestrator: DreamJobOrchestrator = Depends(get_dream_orchestrator)):
     """Manually trigger a specific dream job."""
-    try:
-        if job_id == "salience_refresh":
-            await orchestrator.refresh_salience()
-        elif job_id == "cluster_recent":
-            await orchestrator.cluster_recent()
-        elif job_id == "nightly_recluster":
-            await orchestrator.nightly_recluster()
-        else:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    jobs = {
+        "salience_decay": orchestrator.decay_and_archive,
+        "cluster_recent": orchestrator.cluster_recent,
+        "nightly_recluster": orchestrator.nightly_recluster,
+    }
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found. Available: {sorted(jobs)}")
 
-        return {"message": f"Job {job_id} triggered successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to trigger job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    await job()
+    return {"message": f"Job {job_id} triggered successfully"}
 
 
 @router.get("/cache/stats", operation_id="cache_stats")

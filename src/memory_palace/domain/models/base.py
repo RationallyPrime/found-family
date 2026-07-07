@@ -1,5 +1,6 @@
 import contextlib
-from datetime import datetime
+import typing
+from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID, uuid4
 
@@ -17,15 +18,21 @@ class MemoryType(str, Enum):
     SYSTEM_NOTE = "system_note"
 
     # Derived memories
+    CONSOLIDATION = "consolidation"  # Semantic memory distilled from episodes
     TOPIC_CLUSTER = "topic_cluster"
-    ONTOLOGY_NODE = "ontology_node"
 
-    # Relationships (stored as nodes in Neo4j)
+    # Relationships (transfer type only - stored as edges in Neo4j)
     MEMORY_RELATIONSHIP = "memory_relationship"
 
 
 class GraphModel(BaseModel):
-    """Base class for all Neo4j entities with discriminated union support."""
+    """Base class for all Neo4j entities with discriminated union support.
+
+    Serialization contract with Neo4j:
+    - UUIDs are stored as strings
+    - datetimes are stored as UTC epoch floats
+    - enums are stored as their values
+    """
 
     id: UUID = Field(default_factory=uuid4)
     memory_type: MemoryType
@@ -46,45 +53,50 @@ class GraphModel(BaseModel):
         # Fallback to class name
         return ["Memory", cls.__name__]
 
+    @classmethod
+    def _datetime_fields(cls) -> set[str]:
+        """Field names whose annotation is datetime (or datetime | None)."""
+        fields: set[str] = set()
+        for name, info in cls.model_fields.items():
+            annotation = info.annotation
+            if annotation is datetime or datetime in typing.get_args(annotation):
+                fields.add(name)
+        return fields
+
     def to_neo4j_properties(self) -> dict:
         """Convert to Neo4j-compatible property dict."""
         props = self.model_dump()
 
-        # Convert UUID to string for Neo4j
-        if isinstance(props.get("id"), UUID):
-            props["id"] = str(props["id"])
-
-        # Convert datetime to timestamp
-        if isinstance(props.get("timestamp"), datetime):
-            props["timestamp"] = props["timestamp"].timestamp()
-
-        # Convert enum to value
-        if isinstance(props.get("memory_type"), MemoryType):
-            props["memory_type"] = props["memory_type"].value
-
-        # Convert other UUIDs to strings
         for key, value in props.items():
             if isinstance(value, UUID):
                 props[key] = str(value)
+            elif isinstance(value, datetime):
+                props[key] = value.timestamp()
+            elif isinstance(value, Enum):
+                props[key] = value.value
+            elif isinstance(value, list) and value and isinstance(value[0], UUID):
+                props[key] = [str(v) for v in value]
 
         return props
 
     @classmethod
     def from_neo4j_record(cls, record: dict):
         """Create instance from Neo4j record."""
-        # Convert string back to UUID
-        if "id" in record and isinstance(record["id"], str):
-            record["id"] = UUID(record["id"])
+        record = dict(record)
 
-        # Convert timestamp back to datetime
-        if "timestamp" in record and isinstance(record["timestamp"], int | float):
-            record["timestamp"] = datetime.fromtimestamp(record["timestamp"])
+        # Convert epoch floats back to aware UTC datetimes
+        for field in cls._datetime_fields():
+            match record.get(field):
+                case int() | float() as epoch:
+                    record[field] = datetime.fromtimestamp(epoch, tz=UTC)
 
         # Convert memory_type string back to enum
         if "memory_type" in record and isinstance(record["memory_type"], str):
             record["memory_type"] = MemoryType(record["memory_type"])
 
-        # Convert other string UUIDs back to UUID objects
+        # Convert string UUIDs back to UUID objects
+        if "id" in record and isinstance(record["id"], str):
+            record["id"] = UUID(record["id"])
         for key, value in record.items():
             if key.endswith("_id") and isinstance(value, str):
                 with contextlib.suppress(ValueError):

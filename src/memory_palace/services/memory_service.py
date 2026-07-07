@@ -1,16 +1,16 @@
-"""Refactored Memory Service with discriminated unions and advanced features.
+"""Memory service: the encode/recall/reinforce loop.
 
-This module implements MP-002, MP-003, and MP-008 by providing:
-- Integration with discriminated union models
-- Generic repository usage
-- Specification-based filtering
-- Automatic relationship detection and topic classification
-- Multi-stage recall with ontology boost
+Core hippocampal semantics:
+- Encoding stores an utterance with embedding, salience, and emotional
+  tagging, then detects semantic relationships to existing memories.
+- Recall is cue-based retrieval; every recalled memory is reinforced
+  (access tracking + asymptotic salience boost) — retrieval IS
+  reconsolidation.
 """
 
 from __future__ import annotations
 
-# Standard logging replaced with Logfire logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, LiteralString, cast
 from uuid import UUID, uuid4
 
@@ -76,8 +76,13 @@ class MemoryService:
         role: str,
         conversation_id: UUID | None = None,
         salience: float | None = None,
+        emotional_valence: float = 0.0,
+        emotional_intensity: float = 0.0,
+        pinned: bool = False,
+        source: str | None = None,
         auto_classify: bool = True,
-    ):
+        detect_relationships: bool = True,
+    ) -> FriendUtterance | ClaudeUtterance:
         """Store a single memory message.
 
         Args:
@@ -85,18 +90,22 @@ class MemoryService:
             role: Either 'user' or 'assistant'
             conversation_id: Optional conversation UUID
             salience: Importance rating (0.0-1.0)
+            emotional_valence: Emotional tone, -1.0 (negative) to 1.0 (positive)
+            emotional_intensity: Emotional strength, 0.0 to 1.0
+            pinned: Pinned memories never decay below their salience or get archived
+            source: Which interface wrote this (e.g. "claude.ai", "claude-code")
             auto_classify: Whether to auto-assign topic clusters
+            detect_relationships: Whether to link this memory to semantically
+                similar existing memories (pattern separation → association)
 
         Returns:
             The stored memory object
         """
         logger.info(f"Storing {role} message for conversation {conversation_id}")
 
-        # Generate embedding
         embeddings = await self.embeddings.embed_batch([content])
         embedding = embeddings[0]
 
-        # Use provided salience or default
         from memory_palace.core.constants import SALIENCE_DEFAULT
 
         memory_salience = salience if salience is not None else SALIENCE_DEFAULT
@@ -107,31 +116,28 @@ class MemoryService:
             topic_ids = await self.clusterer.predict([embedding])
             topic_id = topic_ids[0] if topic_ids and topic_ids[0] != -1 else None
 
-        # Create appropriate memory type based on role
-        if role == "user":
-            memory = FriendUtterance(
-                id=uuid4(),
-                content=content,
-                embedding=embedding,
-                conversation_id=conversation_id,
-                topic_id=topic_id,
-                salience=memory_salience,
-            )
-        else:  # assistant
-            memory = ClaudeUtterance(
-                id=uuid4(),
-                content=content,
-                embedding=embedding,
-                conversation_id=conversation_id,
-                topic_id=topic_id,
-                salience=memory_salience,
-            )
+        memory_cls = FriendUtterance if role == "user" else ClaudeUtterance
+        memory = memory_cls(
+            id=uuid4(),
+            content=content,
+            embedding=embedding,
+            conversation_id=conversation_id,
+            topic_id=topic_id,
+            salience=memory_salience,
+            emotional_valence=emotional_valence,
+            emotional_intensity=emotional_intensity,
+            pinned=pinned,
+            source=source,
+        )
 
-        # Store in appropriate repository based on type
         if role == "user":
-            await self.friend_repo.remember(memory)
+            await self.friend_repo.remember(cast(FriendUtterance, memory))
         else:
-            await self.claude_repo.remember(memory)
+            await self.claude_repo.remember(cast(ClaudeUtterance, memory))
+
+        # Associate with existing memories so the graph grows with every encoding
+        if detect_relationships:
+            await self._detect_and_create_relationships(memory)
 
         logger.info(f"Stored {role} memory {memory.id} with topic {topic_id}")
         return memory
@@ -163,12 +169,11 @@ class MemoryService:
         conversation_id: UUID | None = None,
         detect_relationships: bool = True,
         auto_classify: bool = True,
-        similarity_threshold: float = 0.85,
         salience: float | None = None,  # Explicit importance (0.0-1.0)
-    ) -> tuple:
-        """Store a conversation turn as two individual memories with a relationship.
+    ) -> tuple[FriendUtterance, ClaudeUtterance]:
+        """Store a paired exchange as two individual memories linked by PRECEDES.
 
-        This method maintains backward compatibility but now stores memories individually.
+        Convenience composition over remember_message, used by import scripts.
         """
         logger.info(f"Storing conversation turn for conversation {conversation_id}")
 
@@ -179,6 +184,7 @@ class MemoryService:
             conversation_id=conversation_id,
             salience=salience,
             auto_classify=auto_classify,
+            detect_relationships=detect_relationships,
         )
 
         # Store assistant message
@@ -188,6 +194,7 @@ class MemoryService:
             conversation_id=conversation_id,
             salience=salience,
             auto_classify=auto_classify,
+            detect_relationships=detect_relationships,
         )
 
         # Create PRECEDES relationship between messages
@@ -197,18 +204,6 @@ class MemoryService:
             relationship_type="PRECEDES",
             strength=1.0,
         )
-
-        # Detect additional relationships if enabled
-        if detect_relationships:
-            logger.debug("Detecting semantic relationships")
-            user_relationships = await self._detect_and_create_relationships(user_memory, similarity_threshold) or []
-            assistant_relationships = (
-                await self._detect_and_create_relationships(assistant_memory, similarity_threshold) or []
-            )
-
-            # Update salience based on relationship count
-            await self._update_salience_from_relationships(user_memory, len(user_relationships))
-            await self._update_salience_from_relationships(assistant_memory, len(assistant_relationships))
 
         logger.info(f"Successfully stored turn: user={user_memory.id}, assistant={assistant_memory.id}")
         return (user_memory, assistant_memory)
@@ -279,20 +274,27 @@ class MemoryService:
         else:
             return "RELATES_TO"
 
-    async def _update_salience_from_relationships(
-        self, memory: FriendUtterance | ClaudeUtterance, relationship_count: int
-    ):
-        """Update memory salience based on relationship count and strength."""
-        # Boost salience based on how connected the memory is
-        base_boost = 0.1 * relationship_count
-        max_salience = min(1.0, memory.salience + base_boost)
+    @with_error_handling(error_level=ErrorLevel.WARNING, reraise=False)
+    async def _reinforce_memories(self, memory_ids: list[UUID]) -> None:
+        """Reconsolidation: strengthen memories that were just recalled.
 
-        # Update using repository
-        memory.salience = max_salience
-        if isinstance(memory, FriendUtterance):
-            await self.friend_repo.remember(memory)  # This will update existing
-        else:
-            await self.claude_repo.remember(memory)
+        Batched update: access_count += 1, last_accessed = now, and an
+        asymptotic salience boost toward 1.0. Also re-anchors the decay
+        clock so the reinforced value decays from now.
+        """
+        if not memory_ids:
+            return
+
+        from memory_palace.core.constants import SALIENCE_REINFORCEMENT_RATE
+
+        query, _ = MemoryQueries.reinforce_memories()
+        await self.run_query(
+            query,
+            ids=[str(mid) for mid in memory_ids],
+            now=datetime.now(UTC).timestamp(),
+            rate=SALIENCE_REINFORCEMENT_RATE,
+        )
+        logger.debug(f"Reinforced {len(memory_ids)} recalled memories")
 
     @with_error_handling(error_level=ErrorLevel.WARNING, reraise=True)
     async def search_memories(
@@ -304,10 +306,12 @@ class MemoryService:
         min_salience: float | None = None,
         similarity_threshold: float = 0.7,
         limit: int = 50,
+        reinforce: bool = True,
     ) -> list[Memory]:
-        """Search memories using specifications and filters.
+        """Search memories by semantic similarity and/or filters.
 
-        Implements MP-002 integration with specification support.
+        Every returned memory is reinforced (unless reinforce=False):
+        retrieval IS reconsolidation.
         """
         filters = {}
 
@@ -337,6 +341,9 @@ class MemoryService:
         if memory_types:
             type_values = {mt.value for mt in memory_types}
             results = [r for r in results if r.memory_type.value in type_values]
+
+        if reinforce and results:
+            await self._reinforce_memories([r.id for r in results])
 
         logger.info(f"Search returned {len(results)} memories after filtering")
         return results

@@ -31,7 +31,7 @@ class MemoryQueries:
         Returns:
             Tuple of (query, params)
         """
-        where_conditions = ["score > $threshold"]
+        where_conditions = ["score > $threshold", "NOT node:Archived"]
         if labels:
             where_conditions.append(f"node:{labels}")
         if additional_filters:
@@ -122,6 +122,27 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
+    def reinforce_memories() -> tuple[LiteralString, dict[str, Any]]:
+        """Reconsolidation: strengthen memories that were just recalled.
+
+        Retrieval IS reinforcement — updates access tracking and boosts
+        salience asymptotically toward 1.0. Also re-anchors the decay clock.
+
+        Params: $ids (list of memory id strings), $now (epoch float), $rate
+        """
+        query = """
+            UNWIND $ids AS mid
+            MATCH (m:Memory {id: mid})
+            SET m.access_count = coalesce(m.access_count, 0) + 1,
+                m.last_accessed = $now,
+                m.salience = coalesce(m.salience, 0.3) + (1.0 - coalesce(m.salience, 0.3)) * $rate,
+                m.salience_updated_at = $now
+            RETURN count(m) AS reinforced
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
     def get_relationship_edges() -> tuple[LiteralString, dict[str, Any]]:
         """Get all relationship edges for a specific memory."""
         query = """
@@ -140,30 +161,50 @@ class DreamJobQueries:
     """All dream job/maintenance queries in one place."""
 
     @staticmethod
-    def refresh_salience() -> tuple[LiteralString, dict[str, Any]]:
-        """Apply exponential decay to memory salience."""
-        from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
+    def decay_salience() -> tuple[LiteralString, dict[str, Any]]:
+        """Apply exponential decay to memory salience based on ELAPSED TIME.
 
-        query = f"""
+        salience(t) = floor + (salience - floor) * exp(-lambda * days_elapsed)
+
+        Anchored at `salience_updated_at` (epoch float), so the job is
+        idempotent with respect to wall-clock time: running it every minute
+        or once a week produces the same trajectory. Pinned memories and
+        already-archived memories are untouched.
+
+        Params: $now (epoch float), $decay_lambda (per-day), $floor
+        """
+        query = """
             MATCH (m:Memory)
-            WHERE m.salience > {SALIENCE_EVICTION_THRESHOLD}
-            SET m.salience = m.salience * $decay_factor
+            WHERE m.salience IS NOT NULL
+              AND coalesce(m.pinned, false) = false
+              AND NOT m:Archived
+              AND m.salience > $floor
+            WITH m, ($now - coalesce(m.salience_updated_at, m.timestamp, $now)) / 86400.0 AS days
+            WHERE days > 0
+            SET m.salience = $floor + (m.salience - $floor) * exp(-$decay_lambda * days),
+                m.salience_updated_at = $now
             RETURN count(m) AS updated
             """
 
         return cast(LiteralString, query), {}
 
     @staticmethod
-    def evict_low_salience() -> tuple[LiteralString, dict[str, Any]]:
-        """Remove memories with very low salience."""
-        from memory_palace.core.constants import SALIENCE_EVICTION_THRESHOLD
+    def archive_stale_memories() -> tuple[LiteralString, dict[str, Any]]:
+        """Archive (never delete) low-salience, long-unaccessed memories.
 
-        query = f"""
+        Adds the :Archived label, which excludes the memory from all recall
+        paths. Fully reversible; nothing is destroyed.
+
+        Params: $threshold (salience), $cutoff (epoch float, last-access horizon)
+        """
+        query = """
             MATCH (m:Memory)
-            WHERE m.salience < {SALIENCE_EVICTION_THRESHOLD}
-            WITH m, m.id AS id
-            DETACH DELETE m
-            RETURN count(id) AS evicted
+            WHERE coalesce(m.pinned, false) = false
+              AND NOT m:Archived
+              AND m.salience IS NOT NULL AND m.salience < $threshold
+              AND coalesce(m.last_accessed, m.timestamp) < $cutoff
+            SET m:Archived
+            RETURN count(m) AS archived
             """
 
         return cast(LiteralString, query), {}
@@ -296,17 +337,18 @@ class QueryFactory:
         """Build a filtered recall query."""
         labels_str = ":".join(labels)
 
+        conditions = ["NOT m:Archived"]
+        where_params: dict[str, Any] = {}
         if filters:
             from memory_palace.infrastructure.neo4j.filter_compiler import compile_filters
 
             where_clause, where_params = compile_filters(filters, alias="m")
-        else:
-            where_clause = ""
-            where_params = {}
+            if where_clause.startswith("WHERE "):
+                conditions.append(where_clause[6:])
 
         query = f"""
             MATCH (m:{labels_str})
-            {where_clause}
+            WHERE {" AND ".join(conditions)}
             RETURN m
             ORDER BY m.timestamp DESC
             SKIP $offset LIMIT $limit
