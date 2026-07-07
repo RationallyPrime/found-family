@@ -311,6 +311,15 @@ def with_session(
             async with driver.session() as session:
                 return await func(self_obj, session, *args, **kwargs)
 
+        # Advertise the TRANSFORMED signature (without the injected session).
+        # @wraps copies any explicit __signature__ from inner decorators, which
+        # would still include `session` — callers that introspect (APScheduler
+        # validates job args against it) would then demand a session argument.
+        inner_signature = inspect.signature(func)
+        wrapper.__signature__ = inner_signature.replace(  # type: ignore[attr-defined]
+            parameters=[p for name, p in inner_signature.parameters.items() if name != "session"]
+        )
+
         return wrapper
 
     return decorator
