@@ -82,7 +82,7 @@ security:
 
 # Scan the locally built production image.
 security-image: build
-    docker run --rm --cpus {{trivy_cpus}} --memory {{trivy_memory}} --pids-limit 256 -v /var/run/docker.sock:/var/run/docker.sock -v memory-palace-trivy-cache:/root/.cache/trivy {{trivy_image}} image --severity HIGH,CRITICAL --exit-code 1 {{image}}
+    docker run --rm --cpus {{trivy_cpus}} --memory {{trivy_memory}} --pids-limit 256 -v /var/run/docker.sock:/var/run/docker.sock -v memory-palace-trivy-cache:/root/.cache/trivy {{trivy_image}} image --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 {{image}}
     docker pull {{neo4j_image}}
     docker run --rm --cpus {{trivy_cpus}} --memory {{trivy_memory}} --pids-limit 256 -v /var/run/docker.sock:/var/run/docker.sock -v memory-palace-trivy-cache:/root/.cache/trivy -v "$PWD/.trivyignore.yaml:/etc/trivyignore.yaml:ro" {{trivy_image}} image --ignore-unfixed --ignorefile /etc/trivyignore.yaml --severity HIGH,CRITICAL --exit-code 1 {{neo4j_image}}
 

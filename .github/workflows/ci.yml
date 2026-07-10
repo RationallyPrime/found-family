@@ -139,7 +139,10 @@ jobs:
           scan-type: image
           image-ref: memory-palace:ci
           severity: HIGH,CRITICAL
-          ignore-unfixed: false
+          # Base-OS CVEs in the distroless image are only fixable by a digest
+          # bump (Dependabot docker ecosystem); unfixed findings are unactionable
+          # here. Our own dependencies stay strict via the fs scan above.
+          ignore-unfixed: true
           exit-code: "1"
           version: v0.72.0
 
