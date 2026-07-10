@@ -4,6 +4,8 @@
 .env
 .env.*
 !.env.jinja
+.mcp.json
+.copier-answers.yml
 
 # Python artifacts
 __pycache__
@@ -34,5 +36,4 @@ repomix-output.xml
 repomix.config.json
 .repomixignore
 convo.txt
-README.md
 CLAUDE.md

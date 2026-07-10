@@ -1,0 +1,46 @@
+vulnerabilities:
+  - id: CVE-2026-31419
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-46054
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-46242
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-53157
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-53179
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-53359
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-53362
+    purls:
+      - "pkg:deb/debian/linux-libc-dev@6.12.94-1?arch=all&distro=debian-13.5"
+    expired_at: 2026-08-15
+    statement: Header-only package in the pinned Neo4j image; the container uses the host kernel.
+  - id: CVE-2026-54512
+    purls:
+      - "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.21.3"
+    expired_at: 2026-08-15
+    statement: Shaded Parquet dependency in Neo4j 5.26.28; Memory Palace does not expose Parquet ingestion.
+  - id: CVE-2026-54513
+    purls:
+      - "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.21.3"
+    expired_at: 2026-08-15
+    statement: Shaded Parquet dependency in Neo4j 5.26.28; Memory Palace does not expose Parquet ingestion.

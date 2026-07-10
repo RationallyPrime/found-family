@@ -1,8 +1,8 @@
 """Error context management"""
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from types import TracebackType
-from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -16,13 +16,18 @@ logger = get_logger(__name__)
 class ErrorContext:
     """Captures and stores context around an error"""
 
-    def __init__(self, error: Exception, trace_id: str | None = None, **context: Any):
+    def __init__(
+        self,
+        error: Exception,
+        trace_id: str | None = None,
+        context: Mapping[str, object] | None = None,
+    ) -> None:
         self.error = error
         self.trace_id = trace_id or str(uuid4())
         self.timestamp = datetime.now(UTC)
-        self.context = context
+        self.context = dict(context or {})
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """Convert context to dictionary format with structured details from ApplicationError"""
         result = {
             "error_type": self.error.__class__.__name__,
@@ -54,7 +59,7 @@ class ErrorContext:
 class ErrorContextManager:
     """Manages error contexts across the application"""
 
-    def __init__(self, error: Exception | None = None, **context: Any) -> None:
+    def __init__(self, error: Exception | None = None, **context: object) -> None:
         self._contexts: dict[str, ErrorContext] = {}
         self._error = error
         self._context = context
@@ -64,7 +69,7 @@ class ErrorContextManager:
         """Enter async context, capturing error context"""
         if self._error is None:
             raise ValueError("No error provided for context")
-        self._current_context = ErrorContext(self._error, **self._context)
+        self._current_context = ErrorContext(self._error, context=self._context)
         self._contexts[self._current_context.trace_id] = self._current_context
         return self._current_context
 
@@ -86,7 +91,7 @@ class ErrorContextManager:
         """Enter sync context, capturing error context"""
         if self._error is None:
             raise ValueError("No error provided for context")
-        self._current_context = ErrorContext(self._error, **self._context)
+        self._current_context = ErrorContext(self._error, context=self._context)
         self._contexts[self._current_context.trace_id] = self._current_context
         return self._current_context
 
@@ -104,9 +109,9 @@ class ErrorContextManager:
                 exc_info=(exc_type, exc_val, exc_tb),
             )
 
-    async def capture_context(self, error: Exception, **context: Any) -> ErrorContext:
+    async def capture_context(self, error: Exception, **context: object) -> ErrorContext:
         """Capture error context with additional data"""
-        error_context = ErrorContext(error, **context)
+        error_context = ErrorContext(error, context=context)
         self._contexts[error_context.trace_id] = error_context
         return error_context
 
@@ -115,7 +120,7 @@ class ErrorContextManager:
         return self._contexts.get(trace_id)
 
     @staticmethod
-    def extract_details_from_model(model: BaseModel, prefix: str = "") -> dict[str, Any]:
+    def extract_details_from_model(model: BaseModel, prefix: str = "") -> dict[str, object]:
         """Extract fields from a Pydantic model for structured logging.
 
         Args:
@@ -125,7 +130,7 @@ class ErrorContextManager:
         Returns:
             Dictionary of model fields with optional prefix
         """
-        result: dict[str, Any] = {}
+        result: dict[str, object] = {}
 
         # Get model data as dict
         model_data = model.model_dump()

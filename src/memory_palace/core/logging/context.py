@@ -5,7 +5,6 @@ particularly useful when working with logfire and OpenTelemetry.
 """
 
 from contextvars import ContextVar
-from typing import Any
 
 # Import get_logger function from base module
 from .base import get_logger
@@ -15,16 +14,16 @@ logger = get_logger(__name__)
 
 # Context variable to store request-scoped logging context
 # Use None as default to avoid mutable default value issues
-_log_context: ContextVar[dict[str, Any]] = ContextVar("log_context", default={})  # noqa: B039
+_log_context: ContextVar[dict[str, object]] = ContextVar("log_context", default={})  # noqa: B039
 
 
-def get_log_context() -> dict[str, Any]:
+def get_log_context() -> dict[str, object]:
     """Get the current logging context.
 
     Returns:
         Dict containing the current logging context
     """
-    context: dict[str, Any] | None = _log_context.get()
+    context: dict[str, object] | None = _log_context.get()
     if context is None:
         # Initialize with empty dict on first access
         context = {}
@@ -32,7 +31,7 @@ def get_log_context() -> dict[str, Any]:
     return context.copy()
 
 
-def set_log_context(context: dict[str, Any]) -> None:
+def set_log_context(context: dict[str, object]) -> None:
     """Set the logging context.
 
     Args:
@@ -41,7 +40,7 @@ def set_log_context(context: dict[str, Any]) -> None:
     _log_context.set(context)
 
 
-def update_log_context(key: str, value: Any) -> None:
+def update_log_context(key: str, value: object) -> None:
     """Update a single key in the logging context.
 
     Args:
@@ -61,7 +60,7 @@ def clear_log_context() -> None:
 def log_with_context(
     level: str,
     message: str,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
     logger_name: str | None = None,
 ) -> None:
     """Log a message with the current context.
@@ -91,7 +90,7 @@ def log_with_context(
 # Convenience methods
 def debug(
     message: str,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
     logger_name: str | None = None,
 ) -> None:
     """Log a debug message with context."""
@@ -100,7 +99,7 @@ def debug(
 
 def info(
     message: str,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
     logger_name: str | None = None,
 ) -> None:
     """Log an info message with context."""
@@ -109,7 +108,7 @@ def info(
 
 def warning(
     message: str,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
     logger_name: str | None = None,
 ) -> None:
     """Log a warning message with context."""
@@ -118,7 +117,7 @@ def warning(
 
 def error(
     message: str,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
     logger_name: str | None = None,
 ) -> None:
     """Log an error message with context."""
@@ -127,7 +126,7 @@ def error(
 
 def critical(
     message: str,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
     logger_name: str | None = None,
 ) -> None:
     """Log a critical message with context."""

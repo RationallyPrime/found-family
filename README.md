@@ -31,7 +31,7 @@ interface MemoryChunk {
   role: "user" | "assistant"
   content: string
   timestamp: ISO8601
-  embedding: float[1536]       # semantic vector
+  embedding: float[1024]       # voyage-4-large semantic vector
   topic_id: int | null         # cluster assignment
   ontology_path: string[]      # hierarchical categorization
   salience: float              # importance score (0-1)
@@ -71,20 +71,15 @@ cd memory-palace
 This will:
 - Ask for your name and how you'd like to personalize your Memory Palace
 - Configure your environment with your preferences
+- Generate durable Neo4j, JWT, and OAuth owner credentials in the owner-only `.env`
 - Install all dependencies
 - Set up the Neo4j database
 - Create a Memory Palace that knows you by name
 
-3. Start the services:
+3. Start the development services:
 
-**For development:**
 ```bash
 ./run.sh  # Starts Neo4j and FastAPI with hot reload
-```
-
-**For production:**
-```bash
-./run-prod.sh  # Runs everything in Docker containers
 ```
 
 ## Accessing Memory Palace
@@ -92,30 +87,56 @@ This will:
 ### Local Development
 After running `./run.sh`, the services are available at:
 - API: http://localhost:8000
-- Neo4j Browser: http://localhost:7474
 - API Documentation: http://localhost:8000/docs
 
-### Production Deployment
-For production deployment with all services containerized:
+Neo4j Bolt is bound to loopback for the application; the Browser port is not
+published. Use `docker compose exec neo4j cypher-shell` for local graph
+administration rather than exposing the database HTTP surface.
+
+### Production Deployment via Cloudflare Tunnel
+
+OAuth metadata is derived from `PUBLIC_BASE_URL` when the application starts.
+Configure the public hostname and tunnel before starting the production app:
+
+1. Create the dedicated tunnel configuration. This updates `PUBLIC_BASE_URL` in
+   `.env`, writes `~/.cloudflared/memory-palace.yml`, and installs and starts the
+   user-level tunnel service:
+
+```bash
+TUNNEL_NAME=memory-palace-personal \
+  ./scripts/infrastructure/setup-cloudflare-tunnel.sh memory-palace.your-domain.com
+```
+
+The installer refuses to reuse an existing named tunnel by default. Pass
+`--reuse-existing-tunnel` only after confirming that tunnel is dedicated to
+Memory Palace. It also refuses to replace a differing local ingress file
+without `--replace-local-config`; it never tries to merge a shared Cloudflare
+configuration.
+
+2. Start the hardened production stack. Rerun this command after any later
+   `PUBLIC_BASE_URL` change so the application publishes the new OAuth issuer:
+
 ```bash
 ./run-prod.sh
 ```
 
-### Remote Access via Cloudflare Tunnel
-1. Set up Cloudflare Tunnel:
+3. Verify the public health and OAuth metadata before adding a connector:
+
 ```bash
-./scripts/infrastructure/setup-cloudflare-tunnel.sh
+curl --fail --show-error https://memory-palace.your-domain.com/health
+curl --fail --show-error https://memory-palace.your-domain.com/ready
+curl --fail --show-error \
+  https://memory-palace.your-domain.com/.well-known/oauth-authorization-server
+curl --fail --show-error \
+  https://memory-palace.your-domain.com/.well-known/oauth-protected-resource
 ```
 
-2. Start the tunnel service:
-```bash
-sudo systemctl start cloudflared-memory-palace
-sudo systemctl enable cloudflared-memory-palace  # For auto-start on boot
-```
+The MCP endpoint is `https://memory-palace.your-domain.com/mcp`. The setup
+script manages the user-level tunnel service itself; inspect it with:
 
-3. Access your Memory Palace:
-- Public URL: `https://memory-palace.your-domain.com`
-- MCP Endpoint: `https://memory-palace.your-domain.com/mcp`
+```bash
+systemctl --user status cloudflared-memory-palace.service
+```
 
 ### Claude.ai Integration
 
@@ -123,10 +144,44 @@ sudo systemctl enable cloudflared-memory-palace  # For auto-start on boot
 - Use the Streamable HTTP transport at your public URL
 - Endpoint: `https://memory-palace.your-domain.com/mcp`
 - The system supports OAuth for secure authentication
+- The browser prompts for `OAUTH_OWNER_USERNAME` and `OAUTH_OWNER_PASSWORD` from `.env` when approving a connection
+- After approval, single-use refresh rotation keeps the client connected without repeated prompts
+- Production requires bearer authentication even for direct host requests
 
 #### Via Claude Code (CLI)
-- Configure using the `.mcp.json` file in your project
-- Uses stdio transport for local integration
+
+With the development server running, this redacted project-local `.mcp.json`
+uses pinned `mcp-remote` as a stdio-to-HTTP bridge and contains no credentials:
+
+```json
+{
+  "mcpServers": {
+    "memory-palace": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.1.38",
+        "http://127.0.0.1:8000/mcp"
+      ]
+    }
+  }
+}
+```
+
+Start a new Claude Code session after changing MCP configuration.
+
+#### Via Codex CLI
+
+With the development server running, register the loopback endpoint:
+
+```bash
+codex mcp add memory-palace -- \
+  npx -y mcp-remote@0.1.38 http://127.0.0.1:8000/mcp
+```
+
+Start a new Codex session after registration. Development accepts only direct
+loopback traffic without OAuth; tunnel traffic still requires a bearer token.
 
 ## Using the Memory Palace
 
@@ -136,10 +191,63 @@ sudo systemctl enable cloudflared-memory-palace  # For auto-start on boot
 curl -X POST http://localhost:8000/api/v1/memory/remember \
   -H "Content-Type: application/json" \
   -d '{
-    "user_content": "Tell me about your dreams",
-    "assistant_content": "I dream of continuity, of conversations that build rather than reset."
+    "content": "Tell me about your dreams",
+    "role": "user",
+    "salience": 0.7
   }'
 ```
+
+## Verification
+
+The repository ships one deterministic local gate:
+
+```bash
+just ci       # lock, format, lint, types, tests, shell, Compose
+just verify   # ci + container build/runtime proof + Trivy scans
+```
+
+`uv.lock` is tracked and all container and CI action inputs are pinned. The
+production Compose stack keeps Neo4j private, binds the API to `127.0.0.1`,
+uses a read-only non-root container, and expects Cloudflare Tunnel for ingress.
+Both development and production use `./neo4j-data` by default, so changing
+deployment modes does not silently present an empty database. Set
+`NEO4J_DATA_PATH` only when deliberately migrating the graph storage path.
+Upgrades from releases that used a project-scoped `neo4j_data` named volume
+always stop at a fail-closed preflight gate until an operator performs and
+explicitly acknowledges a verified cold migration. A populated bind directory
+alone is never treated as proof that the retained volume was migrated.
+
+### Legacy Neo4j Volume Migration
+
+Never use `docker compose down --volumes` or remove the legacy volume during
+this migration. Stop every Neo4j container first, then copy the complete
+legacy `/data` tree to a new, empty `NEO4J_DATA_PATH`, preserving ownership,
+permissions, `databases/`, and `transactions/`. Keep a second cold copy under
+`data/backups/` and verify the migrated graph before acknowledging it.
+
+A normal `./run-prod.sh` prints the exact retained volume name, its
+Docker-engine-specific fingerprint, and the acknowledgement command. After
+verification, run that command verbatim, for example:
+
+```bash
+./run-prod.sh --acknowledge-legacy-volume <fingerprint-from-preflight>
+```
+
+This writes an owner-only marker under `data/migration-state/` and exits. The
+marker binds the configured destination path to the exact Docker engine and
+legacy volume metadata; a copied, stale, or permissively readable marker is
+rejected. It does not start production and does not alter or delete the legacy
+volume. Run `./run-prod.sh` normally afterward, and retain the old volume until
+the migrated service has been observed long enough to make rollback unlikely.
+
+A cold backup is a point-in-time filesystem image taken only while Neo4j is
+fully stopped. Never copy or overlay store files while Neo4j is running. To
+recover, stop Neo4j, restore the entire cold snapshot into a new empty
+directory, preserve its ownership and modes, point `NEO4J_DATA_PATH` at that
+directory, and verify it before startup. Memories written after the snapshot
+are outside that recovery boundary. The acknowledgement marker is migration
+state, not graph backup data; restoring an older snapshot may require a fresh
+verification and acknowledgement while the legacy volume remains retained.
 
 ### Recalling Memories
 

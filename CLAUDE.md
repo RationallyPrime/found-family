@@ -70,13 +70,14 @@ Curated in `main.py` via `include_operations` — memory verbs only:
 ```bash
 ./run.sh                          # dev: Neo4j (docker) + uvicorn --reload
 ./run-prod.sh                     # prod: full docker compose stack
-uv run ruff format src/ && uv run ruff check src/ --fix
-uv run ty check                   # type checking (Astral ty)
-uv run pytest                     # unit + property tests (fast)
+just format                       # Ruff formatting
+just ci                           # lock + format + lint + ty + tests + config
+just verify                       # CI gate + image/runtime/security scans
+uv run pytest                     # unit + property + integration tests
 uv run pytest -m integration      # needs running Neo4j
 ```
 
-- Neo4j browser: http://localhost:7474 (neo4j/password) · API docs: http://localhost:8000/docs
+- Neo4j browser: http://localhost:7474 (configured credentials) · API docs: http://localhost:8000/docs
 - Backup before graph surgery: `uv run python scripts/backup_graph.py` → `data/backups/`
 - Dream jobs: disabled when `DISABLE_DREAM_JOBS=true` (env). Jobs: `salience_decay`
   (6h), `cluster_recent` (1h), `nightly_recluster` (03:00), `consolidation` (03:30,
@@ -130,7 +131,7 @@ scripts/backup_graph.py            # full graph dump to data/backups/ JSON — r
 scripts/migrate_legacy_graph.py    # Aug-2025 → 2026 schema migration (idempotent, already run)
 scripts/import_*.py                # friendship-memory importers (use remember_turn)
 scripts/review_memories.py         # interactive memory review before import
-scripts/smoke_mcp.py               # manual MCP endpoint smoke test
+scripts/smoke_mcp.py               # bounded, read-only deployment smoke test
 scripts/infrastructure/            # Cloudflare tunnel setup + systemd unit
 ```
 

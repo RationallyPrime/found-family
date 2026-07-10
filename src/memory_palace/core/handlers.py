@@ -1,7 +1,5 @@
 """Error handlers for different types of errors"""
 
-from typing import Any
-
 from fastapi import status
 from starlette.exceptions import HTTPException
 
@@ -19,15 +17,15 @@ class ErrorHandler:
     def __init__(
         self,
         context_manager: ErrorContextManager,
-    ):
+    ) -> None:
         self.context_manager = context_manager
 
     def _format_response(
         self,
         error_context: ErrorContext,
         level: ErrorLevel,
-        additional_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        additional_context: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         """Format error response"""
         # Start with basic error information
         response = {
@@ -43,7 +41,7 @@ class ErrorHandler:
             response["error_code"] = error_context.error.code.value
             # Handle different types of details
             if hasattr(error_context.error.details, "model_dump"):
-                details_dict = error_context.error.details.model_dump()  # type: ignore
+                details_dict = error_context.error.details.model_dump()
             elif isinstance(error_context.error.details, dict):
                 details_dict = error_context.error.details
             else:
@@ -61,8 +59,8 @@ class ErrorHandler:
         self,
         error: Exception,  # noqa: ARG002
         level: ErrorLevel,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
+        context: dict[str, object],
+    ) -> dict[str, object]:
         """Handle error asynchronously"""
         async with self.context_manager as error_context:
             return self._format_response(error_context, level, context)
@@ -71,8 +69,8 @@ class ErrorHandler:
         self,
         error: Exception,  # noqa: ARG002
         level: ErrorLevel,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
+        context: dict[str, object],
+    ) -> dict[str, object]:
         """Handle error synchronously"""
         with self.context_manager as error_context:
             return self._format_response(error_context, level, context)
@@ -81,7 +79,7 @@ class ErrorHandler:
 class GlobalErrorHandler(ErrorHandler):
     """Global error handler for FastAPI application"""
 
-    async def handle_http_exception(self, error: HTTPException) -> dict[str, Any]:
+    async def handle_http_exception(self, error: HTTPException) -> dict[str, object]:
         """Handle HTTP exceptions"""
         level = ErrorLevel.ERROR if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else ErrorLevel.WARNING
         error_context = await self.context_manager.capture_context(error, status_code=error.status_code)

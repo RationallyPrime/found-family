@@ -1,0 +1,8 @@
+# Overrides the operator's durable /data bind with throwaway smoke state.
+services:
+  neo4j:
+    volumes:
+      - neo4j_smoke_data:/data
+
+volumes:
+  neo4j_smoke_data:

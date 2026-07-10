@@ -1,24 +1,128 @@
 services:
   neo4j:
-    image: neo4j:5.26.0
+    image: neo4j:5.26-community-trixie@sha256:4bae36aff76271e27fd6a6ed0835413f86a284cd179cfb1cb7d188f5f7533aca
+    restart: unless-stopped
     environment:
-      NEO4J_AUTH: neo4j/password
-      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}"
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512m
+      NEO4J_server_http_enabled: "false"
+      NEO4J_server_https_enabled: "false"
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"
     volumes:
       - ./neo4j-data:/data
+      - neo4j_dev_logs:/logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          password="$${NEO4J_AUTH#*/}";
+          cypher-shell -u neo4j -p "$${password}" "RETURN 1" >/dev/null 2>&1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+    tmpfs:
+      # JNA extracts a native library here during Neo4j startup, so exec is required.
+      - /tmp:rw,exec,nosuid,nodev,size=64m,mode=1777
+    pids_limit: 512
+    mem_limit: 3g
+    cpus: 1.0
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - backend
+      - neo4j_host_access
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
     ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     environment:
-      - NEO4J_URI=bolt://neo4j:7687
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      CLAUDE_NAME: "${CLAUDE_NAME:-Claude}"
+      CONSOLIDATION_MODEL: "${CONSOLIDATION_MODEL:-anthropic:claude-sonnet-5}"
+      CORS_ALLOWED_ORIGINS: '${CORS_ALLOWED_ORIGINS:-["http://localhost:3000"]}'
+      DEBUG: "${DEBUG:-true}"
+      DISABLE_DREAM_JOBS: "${DISABLE_DREAM_JOBS:-false}"
+      ENVIRONMENT: "${ENVIRONMENT:-development}"
+      FRIEND_NAME: "${FRIEND_NAME:-Friend}"
+      FRIEND_PRONOUNS: "${FRIEND_PRONOUNS:-}"
+      FRIEND_RELATIONSHIP: "${FRIEND_RELATIONSHIP:-friend}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Run ./setup.sh to generate JWT_SECRET_KEY}"
+      LOGFIRE_TOKEN: "${LOGFIRE_TOKEN:-}"
+      MAX_REQUEST_BODY_BYTES: "${MAX_REQUEST_BODY_BYTES:-1048576}"
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}"
+      OAUTH_ACCESS_TOKEN_MINUTES: "${OAUTH_ACCESS_TOKEN_MINUTES:-60}"
+      OAUTH_ALLOWED_REDIRECT_URIS: '${OAUTH_ALLOWED_REDIRECT_URIS:-["https://claude.ai/api/mcp/auth_callback","https://claude.com/api/mcp/auth_callback"]}'
+      OAUTH_OWNER_PASSWORD: "${OAUTH_OWNER_PASSWORD:-}"
+      OAUTH_OWNER_USERNAME: "${OAUTH_OWNER_USERNAME:-owner}"
+      OAUTH_REFRESH_TOKEN_DAYS: "${OAUTH_REFRESH_TOKEN_DAYS:-30}"
+      PALACE_NAME: "${PALACE_NAME:-Memory Palace}"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:8000}"
+      VOYAGE_API_KEY: "${VOYAGE_API_KEY:?Set VOYAGE_API_KEY in .env}"
+      VOYAGE_MODEL: "${VOYAGE_MODEL:-voyage-4-large}"
+      VOYAGE_TIMEOUT_SECONDS: "${VOYAGE_TIMEOUT_SECONDS:-30}"
     volumes:
-      - ./src:/app/src
+      - ./src:/app/src:ro
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).close()
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777,uid=65532,gid=65532
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.0
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - backend
+      - egress
+
+volumes:
+  neo4j_dev_logs:
+
+networks:
+  backend:
+    internal: true
+  # Docker requires a gateway-backed network before it activates a published
+  # host port. Keep that concern separate from the internal app/database lane.
+  neo4j_host_access:
+  egress:

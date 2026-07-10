@@ -6,13 +6,14 @@ ensuring consistent initialization and proper lifecycle management.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from memory_palace.core.base import ServiceErrorDetails
 from memory_palace.core.config import settings
 from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.errors import ServiceError
 from memory_palace.core.logging import get_logger
+from memory_palace.domain.protocols import EmbeddingService
 from memory_palace.infrastructure.embeddings.cache import EmbeddingCache
 from memory_palace.infrastructure.embeddings.voyage import VoyageEmbeddingService
 
@@ -22,22 +23,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class EmbeddingServiceProvider(Protocol):
-    """Protocol for embedding service providers."""
-
-    async def embed_text(self, text: str) -> list[float]:
-        """Generate embedding for text."""
-        ...
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for multiple texts."""
-        ...
-
-    def get_model_dimensions(self) -> int:
-        """Get the dimensions of the embedding model."""
-        ...
-
-
 class EmbeddingServiceBuilder:
     """Builder for creating properly configured embedding service instances.
 
@@ -45,7 +30,7 @@ class EmbeddingServiceBuilder:
     configured and injected rather than using singletons.
     """
 
-    def __init__(self, neo4j_driver: AsyncDriver | None = None):
+    def __init__(self, neo4j_driver: AsyncDriver | None = None) -> None:
         """Initialize the builder with optional Neo4j driver for caching.
 
         Args:
@@ -94,7 +79,7 @@ class EmbeddingServiceBuilder:
         return self
 
     @with_error_handling(reraise=True)
-    def build(self) -> EmbeddingServiceProvider:
+    def build(self) -> EmbeddingService:
         """Build the configured embedding service.
 
         Returns:
@@ -104,7 +89,7 @@ class EmbeddingServiceBuilder:
             ServiceError: If required configuration is missing
         """
         # Use provided API key or fall back to settings
-        api_key = self._api_key or settings.voyage_api_key
+        api_key = self._api_key or settings.voyage_api_key_value
         if not api_key:
             raise ServiceError(
                 message="VOYAGE_API_KEY not configured",
@@ -130,18 +115,14 @@ class EmbeddingServiceBuilder:
 
         # Create embedding service with optional model override
         logger.info(f"Creating VoyageEmbeddingService instance{f' with model {self._model}' if self._model else ''}")
-        service = VoyageEmbeddingService(cache=cache)
-
-        # Override model if specified
-        if self._model:
-            service.model = self._model
+        service = VoyageEmbeddingService(api_key=api_key, model=self._model, cache=cache)
 
         # Validate service is working
         self._validate_service(service)
 
         return service
 
-    def _validate_service(self, service: EmbeddingServiceProvider) -> None:
+    def _validate_service(self, service: EmbeddingService) -> None:
         """Validate that the service is properly configured.
 
         Args:
@@ -171,7 +152,7 @@ def create_embedding_service(
     use_cache: bool = True,
     api_key: str | None = None,
     model: str | None = None,
-) -> EmbeddingServiceProvider:
+) -> EmbeddingService:
     """Convenience function to create an embedding service with dependency injection.
 
     Args:
@@ -204,7 +185,7 @@ def create_embedding_service(
     return builder.build()
 
 
-def validate_embedding_service(service: EmbeddingServiceProvider) -> None:
+def validate_embedding_service(service: EmbeddingService) -> None:
     """Validate an embedding service instance.
 
     Args:

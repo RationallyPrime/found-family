@@ -4,7 +4,7 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Concatenate, ParamSpec, TypeVar, cast
 
 if TYPE_CHECKING:
     from neo4j import AsyncSession
@@ -17,24 +17,7 @@ from .logging import get_logger
 logger = get_logger(__name__)
 P = ParamSpec("P")
 T = TypeVar("T")
-
-
-class ErrorHandlerProtocol(Protocol):
-    """Protocol for error handlers"""
-
-    async def handle_async(
-        self,
-        error: Exception,
-        level: ErrorLevel,
-        context: dict[str, Any],
-    ) -> None: ...
-
-    def handle_sync(
-        self,
-        error: Exception,
-        level: ErrorLevel,
-        context: dict[str, Any],
-    ) -> None: ...
+S = TypeVar("S")
 
 
 def with_error_handling(
@@ -53,7 +36,7 @@ def with_error_handling(
         Decorated function with error handling
     """
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
         # Capture the original signature to preserve it
         original_signature = inspect.signature(func)
 
@@ -62,10 +45,10 @@ def with_error_handling(
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 try:
-                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)  # ty:ignore
+                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)
                 except ApplicationError as e:
                     async with ErrorContextManager(e) as ctx:
-                        error_context: dict[str, Any] = {
+                        error_context: dict[str, object] = {
                             "function": func.__name__,  # ty: ignore
                             "error_context": ctx.to_dict(),
                         }
@@ -110,7 +93,7 @@ def with_error_handling(
 
             # Explicitly set the signature on the wrapper to match the original function
             async_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", async_wrapper)  # ty:ignore
+            return cast("Callable[P, T]", async_wrapper)
         else:
 
             @wraps(func)
@@ -119,7 +102,7 @@ def with_error_handling(
                     return func(*args, **kwargs)
                 except ApplicationError as e:
                     with ErrorContextManager(e) as ctx:
-                        error_context: dict[str, Any] = {
+                        error_context: dict[str, object] = {
                             "function": func.__name__,  # ty:ignore
                             "error_context": ctx.to_dict(),
                         }
@@ -164,7 +147,7 @@ def with_error_handling(
 
             # Explicitly set the signature on the wrapper to match the original function
             sync_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", sync_wrapper)  # ty:ignore
+            return cast("Callable[P, T]", sync_wrapper)
 
     return decorator
 
@@ -174,7 +157,7 @@ def error_context(
 ) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """Decorator for adding error context."""
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
         # Capture the original signature to preserve it
         original_signature = inspect.signature(func)
 
@@ -183,7 +166,7 @@ def error_context(
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 try:
-                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)  # ty:ignore
+                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)
                 except Exception as e:
                     async with ErrorContextManager(e):
                         logger.log(
@@ -195,7 +178,7 @@ def error_context(
 
             # Explicitly set the signature on the wrapper to match the original function
             async_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", async_wrapper)  # ty:ignore
+            return cast("Callable[P, T]", async_wrapper)
         else:
 
             @wraps(func)
@@ -223,7 +206,7 @@ def handle_error(
 ) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """Decorator for handling errors with option to raise original."""
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]:  # ty:ignore
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
         # Capture the original signature to preserve it
         original_signature = inspect.signature(func)
 
@@ -232,7 +215,7 @@ def handle_error(
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 try:
-                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)  # ty:ignore
+                    return await cast("Callable[P, Awaitable[T]]", func)(*args, **kwargs)
                 except Exception as e:
                     async with ErrorContextManager(e):
                         if raise_original:
@@ -242,7 +225,7 @@ def handle_error(
 
             # Explicitly set the signature on the wrapper to match the original function
             async_wrapper.__signature__ = original_signature  # type: ignore
-            return cast("Callable[P, T]", async_wrapper)  # ty:ignore
+            return cast("Callable[P, T]", async_wrapper)
         else:
 
             @wraps(func)
@@ -265,9 +248,7 @@ def handle_error(
 
 def with_session(
     driver_attr: str = "driver",
-) -> (
-    "Callable[[Callable[Concatenate[Any, AsyncSession, P], Awaitable[T]]], Callable[Concatenate[Any, P], Awaitable[T]]]"
-):
+) -> "Callable[[Callable[Concatenate[S, AsyncSession, P], Awaitable[T]]], Callable[Concatenate[S, P], Awaitable[T]]]":
     """Decorator to automatically manage Neo4j session lifecycle.
 
     Eliminates duplicated session management code by automatically wrapping
@@ -295,10 +276,10 @@ def with_session(
     """
 
     def decorator(
-        func: "Callable[Concatenate[Any, AsyncSession, P], Awaitable[T]]",
-    ) -> "Callable[Concatenate[Any, P], Awaitable[T]]":
+        func: "Callable[Concatenate[S, AsyncSession, P], Awaitable[T]]",
+    ) -> "Callable[Concatenate[S, P], Awaitable[T]]":
         @wraps(func)
-        async def wrapper(self_obj: Any, /, *args: P.args, **kwargs: P.kwargs) -> T:
+        async def wrapper(self_obj: S, /, *args: P.args, **kwargs: P.kwargs) -> T:
             driver = getattr(self_obj, driver_attr, None)
 
             if driver is None:
@@ -316,9 +297,10 @@ def with_session(
         # would still include `session` — callers that introspect (APScheduler
         # validates job args against it) would then demand a session argument.
         inner_signature = inspect.signature(func)
-        wrapper.__signature__ = inner_signature.replace(  # type: ignore[attr-defined]
+        signature = inner_signature.replace(
             parameters=[p for name, p in inner_signature.parameters.items() if name != "session"]
         )
+        wrapper.__dict__["__signature__"] = signature
 
         return wrapper
 

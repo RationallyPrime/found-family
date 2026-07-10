@@ -44,6 +44,8 @@ uv run python scripts/import_tiered_memories.py
 ### `backup_graph.py`
 Dump the entire graph (nodes + relationships, embeddings included) to a
 timestamped JSON file under `data/backups/`. Run before any graph surgery.
+Backups are read from one Neo4j snapshot, atomically published, exclude
+ephemeral OAuth codes, and are owner-readable only.
 
 **Usage:**
 ```bash
@@ -56,8 +58,48 @@ unified edges, backfilled lifecycle fields). Idempotent; already run.
 
 **Usage:**
 ```bash
-uv run python scripts/migrate_legacy_graph.py --dry-run
+uv run python scripts/migrate_legacy_graph.py          # read-only plan
+uv run python scripts/migrate_legacy_graph.py --apply  # explicit mutation
 ```
+
+### `adopt_embedding_provenance.py`
+
+Stamp a legacy corpus with its proven embedding model and dimensions without
+regenerating vectors. This is intentionally not automatic: take a backup and
+confirm deployment history before adoption. The command rejects mixed vector
+dimensions, conflicting model metadata, and conflicting schema descriptors.
+
+```bash
+uv run python scripts/adopt_embedding_provenance.py \
+  --model voyage-4-large --dimensions 1024          # read-only proof
+uv run python scripts/adopt_embedding_provenance.py \
+  --model voyage-4-large --dimensions 1024 --apply  # metadata-only migration
+```
+
+### `smoke_mcp.py` and `smoke_oauth.py`
+
+`smoke_mcp.py` is read-only: it checks health, discovery, MCP initialization,
+and the complete tool list. `smoke_oauth.py` additionally exercises a
+Codex-style native client with a loopback callback: DCR, owner approval, S256
+PKCE, bearer-authenticated MCP, refresh rotation, and replay rejection. The
+OAuth smoke password is accepted only through
+`MEMORY_PALACE_SMOKE_OWNER_PASSWORD`; tokens are never printed.
+
+```bash
+uv run python scripts/smoke_mcp.py --target http://127.0.0.1:8000
+
+MEMORY_PALACE_SMOKE_OWNER_PASSWORD='owner-password' \
+  uv run python scripts/smoke_oauth.py \
+    --target http://127.0.0.1:8000 \
+    --redirect-uri http://127.0.0.1:43119/callback/codex-smoke \
+    --owner-username owner \
+    --cleanup-local-state
+```
+
+Use the owner username and password configured in `.env`. This is a protocol
+smoke test, not proof that the Claude.ai UI completed its interactive connector
+flow; verify that separately by adding the public `/mcp` URL in Claude.ai and
+completing browser authorization.
 
 ### `review_memories.py`
 Interactive tool to review, audit, and potentially clean up stored memories.
@@ -78,19 +120,28 @@ uv run python scripts/review_memories.py
 ### Cloudflare Tunnel Setup
 
 #### `setup-cloudflare-tunnel.sh`
-Interactive setup script for configuring Cloudflare tunnels to expose Memory Palace publicly.
+Fail-closed setup script for a dedicated Cloudflare tunnel that exposes Memory
+Palace publicly.
 
 **Usage:**
 ```bash
-./scripts/infrastructure/setup-cloudflare-tunnel.sh
+TUNNEL_NAME=memory-palace-personal \
+  ./scripts/infrastructure/setup-cloudflare-tunnel.sh memory.example.com
 ```
 
 **What it does:**
-1. Checks for cloudflared installation
-2. Creates tunnel configuration
-3. Sets up systemd service
-4. Configures ingress rules
-5. Provides public URL for remote access
+1. Authenticates `cloudflared` when needed
+2. Updates `.env` `PUBLIC_BASE_URL` for the requested hostname
+3. Creates a tunnel and a dedicated `~/.cloudflared/memory-palace.yml`
+4. Validates ingress and configures DNS
+5. Installs and starts the user-level systemd service
+
+An existing tunnel is rejected unless `--reuse-existing-tunnel` explicitly
+certifies that it is dedicated to Memory Palace. Reusing a shared tunnel with
+different one-host ingress files can produce intermittent 404 responses across
+connectors. A differing local config is independently rejected unless
+`--replace-local-config` is passed after review. The installer never modifies
+`~/.cloudflared/config.yml` or merges arbitrary shared ingress.
 
 **Prerequisites:**
 - Cloudflare account
@@ -105,26 +156,18 @@ Template configuration file for Cloudflare tunnel. Defines:
 - TLS configuration
 
 #### `cloudflared-memory-palace.service`
-Systemd service file for running the Cloudflare tunnel as a daemon.
-
-**Installation:**
-```bash
-sudo cp scripts/infrastructure/cloudflared-memory-palace.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable cloudflared-memory-palace
-sudo systemctl start cloudflared-memory-palace
-```
+User-level systemd service installed by `setup-cloudflare-tunnel.sh`.
 
 **Management:**
 ```bash
 # Check status
-sudo systemctl status cloudflared-memory-palace
+systemctl --user status cloudflared-memory-palace
 
 # View logs
-sudo journalctl -u cloudflared-memory-palace -f
+journalctl --user -u cloudflared-memory-palace -f
 
 # Restart tunnel
-sudo systemctl restart cloudflared-memory-palace
+systemctl --user restart cloudflared-memory-palace
 ```
 
 ## Environment Requirements
@@ -155,31 +198,18 @@ uv run python scripts/import_curated_memories.py
 uv run python scripts/review_memories.py
 ```
 
-### Setting Up Remote Access
-```bash
-# 1. Configure Cloudflare tunnel
-./scripts/infrastructure/setup-cloudflare-tunnel.sh
-
-# 2. Install and start service
-sudo cp scripts/infrastructure/cloudflared-memory-palace.service /etc/systemd/system/
-sudo systemctl enable --now cloudflared-memory-palace
-
-# 3. Verify tunnel is running
-sudo systemctl status cloudflared-memory-palace
-```
-
 ## Troubleshooting
 
 ### Import Scripts Failing
 - Check Neo4j is running: `docker compose ps`
-- Verify API is accessible: `curl http://localhost:8000/api/v1/memory/health`
+- Verify readiness: `curl --fail http://localhost:8000/ready`
 - Ensure VOYAGE_API_KEY is set in `.env`
 - Check input file formats match expected structure
 
 ### Cloudflare Tunnel Issues
 - Verify cloudflared is installed: `cloudflared version`
 - Check tunnel status: `cloudflared tunnel list`
-- Review logs: `sudo journalctl -u cloudflared-memory-palace -n 50`
+- Review logs: `journalctl --user -u cloudflared-memory-palace.service -n 50`
 - Ensure domain is configured in Cloudflare dashboard
 
 ## Development Notes

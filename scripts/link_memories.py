@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 
 
 async def main(threshold: float, dry_run: bool) -> None:
-    driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
+    driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password_value))
     embeddings = create_embedding_service(neo4j_driver=driver, use_cache=True)
 
     async with driver.session() as session:

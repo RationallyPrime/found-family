@@ -1,6 +1,6 @@
 import hashlib
 
-from neo4j import AsyncDriver
+from neo4j import AsyncDriver, AsyncSession
 
 from memory_palace.core.decorators import with_session
 from memory_palace.infrastructure.neo4j.queries import CacheQueries
@@ -13,17 +13,17 @@ class EmbeddingCache:
     serving stale embeddings when models are switched.
     """
 
-    def __init__(self, driver: AsyncDriver):
+    def __init__(self, driver: AsyncDriver) -> None:
         """Initialize cache with a driver instead of session for proper lifecycle."""
         self.driver = driver
 
     @staticmethod
     def _cache_key(text: str, model: str) -> str:
-        """Model-scoped cache key to prevent cross-model contamination."""
-        return hashlib.md5(f"{model}::{text}".encode()).hexdigest()
+        """Build a collision-resistant, model-scoped content key."""
+        return hashlib.sha256(f"{model}::{text}".encode()).hexdigest()
 
     @with_session()
-    async def get_cached(self, session, text: str, model: str) -> list[float] | None:
+    async def get_cached(self, session: AsyncSession, text: str, model: str) -> list[float] | None:
         """Retrieve a cached embedding if available, not expired, and from the same model."""
         query, _ = CacheQueries.get_cached_embedding()
         result = await session.run(query, key=self._cache_key(text, model), model=model)
@@ -31,7 +31,14 @@ class EmbeddingCache:
         return record["embedding"] if record else None
 
     @with_session()
-    async def store(self, session, text: str, model: str, embedding: list[float], dimensions: int) -> None:
+    async def store(
+        self,
+        session: AsyncSession,
+        text: str,
+        model: str,
+        embedding: list[float],
+        dimensions: int,
+    ) -> None:
         """Store an embedding in the cache with model metadata."""
         query, _ = CacheQueries.store_embedding()
         await session.run(

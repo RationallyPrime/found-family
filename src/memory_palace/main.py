@@ -16,25 +16,39 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import AuthConfig, FastApiMCP
 from neo4j import AsyncDriver
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from memory_palace.api import dependencies
 from memory_palace.api.auth import require_remote_auth
 from memory_palace.api.endpoints import admin, core, memory, oauth
+from memory_palace.api.middleware import HTTPBoundaryMiddleware
+from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger, setup_logging
-from memory_palace.infrastructure.embeddings.factory import (
-    EmbeddingServiceProvider,
-    create_embedding_service,
-)
+from memory_palace.domain.protocols import EmbeddingService
+from memory_palace.infrastructure.embeddings.factory import create_embedding_service
 from memory_palace.infrastructure.neo4j.driver import (
-    create_neo4j_driver,
+    ensure_embedding_compatibility,
+    ensure_schema,
     ensure_vector_index,
+    open_neo4j_driver,
 )
 from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.dream_jobs import DreamJobOrchestrator
 from memory_palace.services.memory_service import MemoryService
 
-# Enhanced Logfire configuration with proper instrumentation
-logfire.configure(service_name="memory-palace", token=os.getenv("LOGFIRE_TOKEN"))
+# Enhanced Logfire configuration with proper instrumentation. Ambient CLI
+# credentials must never turn local imports into implicit telemetry exports.
+logfire_token = settings.logfire_token.get_secret_value()
+logfire.configure(
+    service_name="memory-palace",
+    environment=settings.environment.value,
+    token=logfire_token or None,
+    send_to_logfire=bool(logfire_token),
+    inspect_arguments=False,
+    scrubbing=logfire.ScrubbingOptions(
+        extra_patterns=["authorization", "cookie", "jwt", "memory.content", "oauth", "token"]
+    ),
+)
 
 # Install auto-tracing with ignore for already imported modules
 logfire.install_auto_tracing(
@@ -49,7 +63,7 @@ logger = get_logger(__name__)
 memory_service: MemoryService | None = None
 dream_orchestrator: DreamJobOrchestrator | None = None
 neo4j_driver: AsyncDriver | None = None
-embedding_service: EmbeddingServiceProvider | None = None
+embedding_service: EmbeddingService | None = None
 clustering_service: DBSCANClusteringService | None = None
 
 
@@ -61,15 +75,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     logger.info("🧠 Starting Memory Palace application...")
 
     try:
+        settings.validate_runtime()
+
         # Initialize Neo4j driver (keep it for the app lifetime)
         logger.info("📊 Initializing Neo4j connection...")
-        neo4j_driver = None
-        async for driver in create_neo4j_driver():
-            neo4j_driver = driver
-            break  # We get the driver from the generator
-
-        if neo4j_driver is None:
-            raise RuntimeError("Failed to initialize Neo4j driver")
+        neo4j_driver = await open_neo4j_driver()
+        await ensure_schema(neo4j_driver)
 
         # Initialize embedding service with dependency injection
         logger.info("🧮 Initializing Embedding Service...")
@@ -79,6 +90,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         embedding_dims = embedding_service.get_model_dimensions()
         logger.info(f"📏 Using embedding model with {embedding_dims} dimensions")
 
+        await ensure_embedding_compatibility(
+            neo4j_driver,
+            model=settings.voyage_model,
+            dimensions=embedding_dims,
+        )
+
         # Ensure vector index exists with correct dimensions
         await ensure_vector_index(neo4j_driver, dimensions=embedding_dims)
         logger.info("✅ Vector index initialized with correct dimensions")
@@ -86,8 +103,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         # Initialize clustering service and load model
         logger.info("🔍 Initializing Clustering Service...")
         clustering_service = DBSCANClusteringService()
-        async with neo4j_driver.session() as session:
-            await clustering_service.load_model(session)
 
         # Set global dependencies for API endpoints
         dependencies.neo4j_driver = neo4j_driver
@@ -154,6 +169,9 @@ app = FastAPI(
     description="Advanced memory management system for AI conversations",
     version="0.1.0",
     lifespan=lifespan,
+    debug=settings.debug,
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
 )
 
 # Enable FastAPI instrumentation for request tracing
@@ -164,19 +182,21 @@ logfire.instrument_fastapi(app)
 # so this only needs to cover actual browser frontends.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_origin_values,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "HEAD", "POST"],
+    allow_headers=["Authorization", "Content-Type", "Mcp-Protocol-Version", "X-Correlation-ID", "X-Request-ID"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+app.add_middleware(HTTPBoundaryMiddleware, max_request_body_bytes=settings.max_request_body_bytes)
 
 # Mount API routers.
 # Memory and admin routes are gated: requests arriving through the
 # Cloudflare tunnel must carry a valid Bearer JWT; local traffic is trusted.
 # OAuth/well-known and health stay public — the flow needs them.
-app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"], dependencies=[Depends(require_remote_auth)])
+app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
 app.include_router(core.router)
-app.include_router(admin.router, dependencies=[Depends(require_remote_auth)])
+app.include_router(admin.router)
 app.include_router(oauth.router)  # Include OAuth endpoints for Claude.ai MCP
 
 # Add MCP support — expose only the memory verbs as tools.
@@ -193,9 +213,6 @@ mcp = FastApiMCP(
         "awaken",
         "forget",
         "health",
-        "job_status",
-        "trigger",
-        "cache_stats",
     ],
     # Same gate as the REST routers: tunnel traffic needs a Bearer JWT.
     # Internal tool execution forwards only the Authorization header
@@ -210,4 +227,4 @@ if __name__ == "__main__":
     """Development server entry point."""
     logger.info("🚀 Starting Memory Palace development server...")
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info", access_log=True)
+    uvicorn.run("memory_palace.main:app", host="127.0.0.1", port=8000, reload=True, log_level="info", access_log=True)

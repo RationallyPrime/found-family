@@ -1,16 +1,15 @@
 """Base error classes and enums"""
 
 import logging
-from datetime import datetime
-from enum import Enum
-from typing import Any, Self
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID
 
-from logfire.integrations.pydantic import PluginSettings
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_serializer
 
 
-class ErrorLevel(str, Enum):
+class ErrorLevel(StrEnum):
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
@@ -28,7 +27,7 @@ class ErrorLevel(str, Enum):
         }[self]
 
 
-class ErrorCode(str, Enum):
+class ErrorCode(StrEnum):
     """Error codes for the application."""
 
     # General Errors (1xxx)
@@ -45,7 +44,7 @@ class ErrorCode(str, Enum):
     USER_ALREADY_EXISTS = "1010"
     USER_CREATION_FAILED = "1011"
     USER_NOT_FOUND = "1012"
-    INVALID_TOKEN = "1013"
+    INVALID_TOKEN = "1013"  # noqa: S105 - public error code, not a credential
 
     # API Errors (2xxx)
     AUTHENTICATION_FAILED = "2001"
@@ -77,12 +76,15 @@ class ErrorCode(str, Enum):
     STORAGE_OPERATION = "6003"
 
 
-class ErrorDetails(BaseModel, plugin_settings=PluginSettings(logfire={"record": "all"})):
+class ErrorDetails(BaseModel):
     """Base model for structured error details"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     source: str = Field(description="Component or module where the error occurred")
     operation: str = Field(description="Operation being performed when the error occurred")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(), description="When the error occurred")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC), description="When the error occurred")
+    metadata: dict[str, JsonValue] = Field(default_factory=dict, description="Operation-specific structured context")
 
     # Ensure timestamp is serialized consistently
     @field_serializer("timestamp")
@@ -94,7 +96,7 @@ class ValidationErrorDetails(ErrorDetails):
     """Details for validation-related errors"""
 
     field: str | None = Field(None, description="Field that failed validation")
-    actual_value: Any = Field(None, description="Value that failed validation")
+    actual_value: object = Field(None, description="Value that failed validation")
     expected_type: str | None = Field(None, description="Expected type or format")
     constraint: str | None = Field(None, description="Constraint that was violated")
 
@@ -149,8 +151,8 @@ class ApplicationError(Exception):
         message: str,
         code: ErrorCode,
         level: ErrorLevel = ErrorLevel.ERROR,
-        details: ErrorDetails | dict[str, Any] | None = None,
-    ):
+        details: ErrorDetails | Mapping[str, JsonValue] | None = None,
+    ) -> None:
         self.message = message
         self.code = code
         self.level = level
@@ -158,23 +160,22 @@ class ApplicationError(Exception):
         # Convert dict to ErrorDetails if needed
         if details is None:
             self.details = ErrorDetails(source="unknown", operation="unknown")
-        elif isinstance(details, dict):
-            # Extract source and operation from dict if available, otherwise use defaults
-            source = details.pop("source", "unknown")
-            operation = details.pop("operation", "unknown")
-            self.details = ErrorDetails(source=source, operation=operation, **details)
+        elif isinstance(details, Mapping):
+            metadata = dict(details)
+            source_value = metadata.pop("source", "unknown")
+            operation_value = metadata.pop("operation", "unknown")
+            self.details = ErrorDetails(
+                source=str(source_value),
+                operation=str(operation_value),
+                metadata=metadata,
+            )
         else:
             self.details = details
 
         super().__init__(message)
 
-    @classmethod
-    def with_details(cls, message: str, details: ErrorDetails, **kwargs: Any) -> Self:
-        """Create an error with specific details model"""
-        return cls(message=message, details=details, **kwargs)
 
-
-class ErrorMetadata(BaseModel, plugin_settings=PluginSettings(logfire={"record": "all"})):
+class ErrorMetadata(BaseModel):
     """Metadata for error tracking and analysis"""
 
     code: ErrorCode = Field(description="Error code identifying the type of error")
@@ -184,7 +185,7 @@ class ErrorMetadata(BaseModel, plugin_settings=PluginSettings(logfire={"record":
     service: str = Field(description="Service where the error occurred")
     endpoint: str | None = Field(None, description="API endpoint if applicable")
     user_id: UUID | None = Field(None, description="User ID if authenticated")
-    additional_data: dict[str, Any] = Field(default_factory=dict, description="Extra context")
+    additional_data: dict[str, object] = Field(default_factory=dict, description="Extra context")
 
     # Ensure timestamp is serialized consistently
     @field_serializer("timestamp")
