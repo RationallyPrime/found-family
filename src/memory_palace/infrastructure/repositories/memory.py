@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any, LiteralString, cast
 from uuid import UUID
 
@@ -20,7 +21,7 @@ logger = get_logger(__name__)
 class GenericMemoryRepository[T: GraphModel]:
     """Generic repository for all memory types using discriminated unions and type safety."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
@@ -110,7 +111,7 @@ class GenericMemoryRepository[T: GraphModel]:
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def connect(
         self, source_id: UUID, target_id: UUID, relationship_type: str, properties: dict[str, Any] | None = None
-    ):
+    ) -> None:
         """Create a relationship between two memories."""
         # Use centralized query with proper relationship type parameter
         query, _ = MemoryQueries.create_relationship(relationship_type)
@@ -120,7 +121,7 @@ class GenericMemoryRepository[T: GraphModel]:
         logger.debug(f"Created {relationship_type} relationship: {source_id} -> {target_id}")
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
-    async def disconnect(self, source_id: UUID, target_id: UUID, relationship_type: str | None = None):
+    async def disconnect(self, source_id: UUID, target_id: UUID, relationship_type: str | None = None) -> None:
         """Remove relationship(s) between two memories."""
         # Use centralized query
         query, _ = MemoryQueries.delete_relationship(relationship_type)
@@ -130,14 +131,6 @@ class GenericMemoryRepository[T: GraphModel]:
         record = await result.single()
         deleted_count = record["deleted"] if record else 0
         logger.debug(f"Deleted {deleted_count} relationships between {source_id} and {target_id}")
-
-    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
-    async def delete(self, memory_id: UUID, memory_type: type[T] | None = None):
-        """Delete a memory and all its relationships (administrative use only)."""
-        query, _ = MemoryQueries.delete_memory(memory_type.labels() if memory_type else None)
-
-        await self.session.run(query, id=str(memory_id))
-        logger.debug(f"Deleted memory {memory_id}")
 
     def _build_where_clause(self, filters: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
         """Build WHERE clause from filters using safe parameterization.
@@ -165,26 +158,33 @@ class GenericMemoryRepository[T: GraphModel]:
         try:
             return memory_type.from_neo4j_record(record)
         except Exception as e:
-            logger.error(f"Failed to convert record to {memory_type.__name__}", exc_info=True)
-            logger.debug(f"Problematic record: {record}")
+            record_id = record.get("id")
+            property_names = sorted(str(key) for key in record)
+            logger.error(
+                "Memory record deserialization failed",
+                memory_type=memory_type.__name__,
+                record_id=str(record_id) if record_id is not None else None,
+                property_names=property_names,
+                error_type=type(e).__name__,
+            )
             raise ProcessingError(
-                message=f"Failed to deserialize {memory_type.__name__} from Neo4j record: {e}",
+                message=f"Failed to deserialize {memory_type.__name__} from Neo4j record",
                 details={
                     "source": "memory_repository",
                     "operation": "_record_to_memory",
-                    "field": "record",
-                    "actual_value": str(record)[:200],  # Truncate for readability
+                    "record_id": str(record_id) if record_id is not None else None,
+                    "property_names": property_names,
                     "expected_type": memory_type.__name__,
-                    "constraint": f"Must be valid {memory_type.__name__} record",
+                    "error_type": type(e).__name__,
                 },
-            ) from e
+            ) from None
 
 
 class MemoryRepository(GenericMemoryRepository[Memory]):
     """Specialized repository for the Memory discriminated union."""
 
     @staticmethod
-    def _validate_union_record(node: Any) -> Memory | None:
+    def _validate_union_record(node: Mapping[str, object]) -> Memory | None:
         """Validate a Neo4j node mapping into the Memory union.
 
         Returns None (with a warning) for nodes missing memory_type —

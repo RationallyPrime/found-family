@@ -18,7 +18,6 @@ build/
 
 # UV
 .uv/
-uv.lock
 
 # IDE
 .vscode/
@@ -30,6 +29,8 @@ uv.lock
 .env
 .env.*
 !.env.example
+/memory-palace.env
+.copier-answers.yml
 
 # Neo4j
 neo4j-data/
@@ -49,6 +50,9 @@ test_*.json
 # IDE specific
 .zed/
 .mcp.json
+.claude/settings.local.json
+.logfire/
+.remember/
 
 # Temporary scripts
 update_imports.sh

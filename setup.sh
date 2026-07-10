@@ -1,150 +1,228 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+readonly ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly COPIER_VERSION="9.7.1"
+readonly PREK_VERSION="0.3.8"
+readonly STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-120}"
+readonly GENERATED_ENV_FILE="$ROOT_DIR/memory-palace.env"
 
-echo -e "${BLUE}🏛️ Welcome to the Memory Palace setup!${NC}"
-echo "======================================"
-echo ""
-echo "This will help you personalize your Memory Palace and set up the required services."
-echo ""
+cd "$ROOT_DIR"
+export MEMORY_PALACE_ENV_FILE="$ROOT_DIR/.env"
 
-# Check for Docker
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}❌ Docker is not installed!${NC}"
-    echo "Please install Docker first: https://docs.docker.com/get-docker/"
-    exit 1
-fi
-
-# Check for Docker Compose
-if ! docker compose version &> /dev/null; then
-    echo -e "${RED}❌ Docker Compose is not installed!${NC}"
-    echo "Please install Docker Compose: https://docs.docker.com/compose/install/"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Docker and Docker Compose found${NC}"
-
-# Check if copier is installed
-if ! command -v copier &> /dev/null; then
-    echo -e "${YELLOW}📦 Installing Copier...${NC}"
-    if command -v uv &> /dev/null; then
-        uv tool install copier || {
-            echo -e "${RED}Failed to install Copier${NC}"
-            exit 1
-        }
-    else
-        echo -e "${YELLOW}Installing uv first...${NC}"
-        curl -LsSf https://astral.sh/uv/install.sh | sh || {
-            echo -e "${RED}Failed to install uv${NC}"
-            exit 1
-        }
-        source ~/.bashrc || source ~/.zshrc || true  # Reload shell
-        uv tool install copier || {
-            echo -e "${RED}Failed to install Copier${NC}"
-            exit 1
-        }
-    fi
-fi
-echo -e "${GREEN}✓ Copier is installed${NC}"
-
-# Check if .env already exists
-if [ -f .env ]; then
-    echo -e "${YELLOW}⚠️  .env file already exists.${NC}"
-    read -p "Do you want to reconfigure? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${BLUE}Keeping existing configuration.${NC}"
-    else
-        mv .env .env.backup-$(date +%Y%m%d-%H%M%S)
-        echo -e "${GREEN}Backed up existing .env with timestamp${NC}"
-        echo -e "${BLUE}🎨 Let's personalize your Memory Palace...${NC}"
-        copier copy --trust . . --data-file copier.yml --answers-file .copier-answers.yml || {
-            echo -e "${RED}Configuration failed. Restoring backup...${NC}"
-            mv .env.backup-* .env
-            exit 1
-        }
-    fi
-else
-    # Run copier to generate .env
-    echo -e "${BLUE}🎨 Let's personalize your Memory Palace...${NC}"
-    copier copy --trust . . --data-file copier.yml --answers-file .copier-answers.yml || {
-        echo -e "${RED}Configuration failed${NC}"
-        exit 1
-    }
-fi
-
-# Install dependencies
-echo ""
-echo -e "${YELLOW}📦 Installing Python dependencies...${NC}"
-if command -v uv &> /dev/null; then
-    uv sync || {
-        echo -e "${RED}Failed to install Python dependencies${NC}"
-        exit 1
-    }
-else
-    echo -e "${YELLOW}Installing uv first...${NC}"
-    curl -LsSf https://astral.sh/uv/install.sh | sh || {
-        echo -e "${RED}Failed to install uv${NC}"
-        exit 1
-    }
-    uv sync || {
-        echo -e "${RED}Failed to install Python dependencies${NC}"
-        exit 1
-    }
-fi
-echo -e "${GREEN}✓ Python dependencies installed${NC}"
-
-# Start Neo4j
-echo ""
-echo -e "${YELLOW}🗄️ Starting Neo4j database...${NC}"
-docker compose up -d neo4j || {
-    echo -e "${RED}Failed to start Neo4j${NC}"
+die() {
+    printf 'error: %s\n' "$*" >&2
     exit 1
 }
 
-# Wait for Neo4j to be ready
-echo -e "${YELLOW}Waiting for Neo4j to be ready...${NC}"
-max_attempts=30
-attempt=0
-while [ $attempt -lt $max_attempts ]; do
-    if docker compose exec -T neo4j cypher-shell -u neo4j -p password "RETURN 1" &>/dev/null; then
-        echo -e "${GREEN}✓ Neo4j is ready!${NC}"
-        break
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+trim() {
+    local value=$1
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+dotenv_value() {
+    local key=$1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" =~ ^[[:space:]]*${key}[[:space:]]*=(.*)$ ]]; then
+            value="$(trim "${BASH_REMATCH[1]}")"
+            if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+                value="${value:1:${#value}-2}"
+            elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+                value="${value:1:${#value}-2}"
+            fi
+            printf '%s' "$value"
+            return 0
+        fi
+    done < .env
+    return 1
+}
+
+set_dotenv_value() {
+    local key=$1
+    local value=$2
+    local tmp_file
+    tmp_file="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
+
+    awk -v key="$key" -v value="$value" '
+        BEGIN { replaced = 0 }
+        $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+            if (!replaced) {
+                print key "=" value
+                replaced = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!replaced) {
+                print key "=" value
+            }
+        }
+    ' .env > "$tmp_file"
+
+    chmod 600 "$tmp_file"
+    mv -f -- "$tmp_file" .env
+}
+
+configure_environment() {
+    local backup=""
+    local previous_db_password=""
+    local previous_jwt_secret=""
+    local previous_owner_password=""
+    local previous_owner_username=""
+    local reply=""
+
+    if [[ -f .env ]]; then
+        read -r -p ".env already exists. Reconfigure it? [y/N] " reply
+        if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+            printf 'Keeping the existing .env.\n'
+            return 0
+        fi
+
+        previous_db_password="$(dotenv_value NEO4J_PASSWORD || true)"
+        previous_jwt_secret="$(dotenv_value JWT_SECRET_KEY || true)"
+        previous_owner_password="$(dotenv_value OAUTH_OWNER_PASSWORD || true)"
+        previous_owner_username="$(dotenv_value OAUTH_OWNER_USERNAME || true)"
+        backup=".env.backup-$(date -u +%Y%m%dT%H%M%SZ)"
+        mv -- .env "$backup"
+        chmod 600 "$backup"
+        printf 'Existing configuration backed up to %s.\n' "$backup"
     fi
-    echo -n "."
-    sleep 2
-    attempt=$((attempt + 1))
-done
 
-if [ $attempt -eq $max_attempts ]; then
-    echo -e "\n${RED}Neo4j failed to start after 60 seconds${NC}"
-    echo "Check logs with: docker compose logs neo4j"
-    exit 1
-fi
+    rm -f -- "$GENERATED_ENV_FILE"
+    if ! uvx --from "copier==${COPIER_VERSION}" copier copy \
+        . . --answers-file .copier-answers.yml; then
+        rm -f -- "$GENERATED_ENV_FILE" .env
+        if [[ -n "$backup" ]]; then
+            mv -- "$backup" .env
+        fi
+        die "configuration generation failed"
+    fi
 
-# Verify API key is present
-if ! grep -q "VOYAGE_API_KEY=" .env || [ -z "$(grep VOYAGE_API_KEY= .env | cut -d'=' -f2)" ]; then
-    echo -e "\n${YELLOW}⚠️  Warning: VOYAGE_API_KEY is not set in .env${NC}"
-    echo "You'll need to add your Voyage AI API key before the system can generate embeddings."
-    echo "Get one at: https://www.voyageai.com/"
-fi
+    if [[ ! -f "$GENERATED_ENV_FILE" ]]; then
+        if [[ -n "$backup" ]]; then
+            mv -- "$backup" .env
+        fi
+        die "Copier did not generate memory-palace.env"
+    fi
 
-# Run the application
-echo ""
-echo -e "${GREEN}✨ Memory Palace setup complete!${NC}"
-echo ""
-echo "To start the Memory Palace server, run:"
-echo -e "  ${BLUE}./run.sh${NC}       # For development"
-echo -e "  ${BLUE}./run-prod.sh${NC}  # For production"
-echo ""
-if [ -f .env ] && grep -q FRIEND_NAME .env; then
-    FRIEND_NAME=$(grep FRIEND_NAME .env | cut -d'"' -f2 || echo "Friend")
-    echo -e "Your Memory Palace has been personalized for: ${GREEN}${FRIEND_NAME}${NC}"
+    mv -- "$GENERATED_ENV_FILE" .env
+    chmod 600 .env
+
+    # These secrets identify durable state. Reconfiguration may change profile
+    # data and provider keys, but it must not silently orphan a Neo4j volume or
+    # invalidate every issued OAuth token.
+    if [[ -n "$previous_db_password" ]]; then
+        set_dotenv_value NEO4J_PASSWORD "$previous_db_password"
+    fi
+    if [[ -n "$previous_jwt_secret" ]]; then
+        set_dotenv_value JWT_SECRET_KEY "$previous_jwt_secret"
+    fi
+    if [[ -n "$previous_owner_password" ]]; then
+        set_dotenv_value OAUTH_OWNER_PASSWORD "$previous_owner_password"
+    fi
+    if [[ -n "$previous_owner_username" ]]; then
+        set_dotenv_value OAUTH_OWNER_USERNAME "$previous_owner_username"
+    fi
+    unset previous_db_password previous_jwt_secret previous_owner_password previous_owner_username
+}
+
+ensure_jwt_secret() {
+    local jwt_secret=""
+    jwt_secret="$(dotenv_value JWT_SECRET_KEY || true)"
+    if [[ ${#jwt_secret} -ge 32 && "$jwt_secret" != "generate_me" ]]; then
+        return 0
+    fi
+
+    jwt_secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+    set_dotenv_value JWT_SECRET_KEY "$jwt_secret"
+    unset jwt_secret
+    printf 'Generated a persistent JWT signing key.\n'
+}
+
+ensure_database_password() {
+    local password=""
+    password="$(dotenv_value NEO4J_PASSWORD || true)"
+    if [[ -z "$password" ]]; then
+        password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+        set_dotenv_value NEO4J_PASSWORD "$password"
+        printf 'Generated a strong Neo4j password.\n'
+    elif [[ "$password" == "password" || "$password" == your_* || ${#password} -lt 16 ]]; then
+        die "choose a non-default NEO4J_PASSWORD of at least 16 characters, then rerun setup"
+    fi
+    unset password
+}
+
+ensure_oauth_owner_credentials() {
+    local password=""
+    local username=""
+
+    username="$(dotenv_value OAUTH_OWNER_USERNAME || true)"
+    if [[ -z "$username" ]]; then
+        set_dotenv_value OAUTH_OWNER_USERNAME owner
+    fi
+
+    password="$(dotenv_value OAUTH_OWNER_PASSWORD || true)"
+    if [[ -z "$password" ]]; then
+        password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+        set_dotenv_value OAUTH_OWNER_PASSWORD "$password"
+        printf 'Generated a strong OAuth owner password.\n'
+    elif [[ "$password" == "password" || "$password" == "generate_me" \
+        || "$password" == your_* || ${#password} -lt 16 ]]; then
+        die "choose an OAUTH_OWNER_PASSWORD of at least 16 characters, then rerun setup"
+    fi
+    unset password username
+}
+
+require_command docker
+require_command uv
+require_command python3
+docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required"
+
+configure_environment
+[[ -f .env ]] || die "configuration did not create .env"
+chmod 600 .env
+ensure_jwt_secret
+ensure_database_password
+ensure_oauth_owner_credentials
+
+printf 'Installing the locked development environment...\n'
+uv sync --frozen
+
+prek_bin="$(command -v prek || true)"
+prek_version_output=""
+if [[ -n "$prek_bin" ]]; then
+    prek_version_output="$("$prek_bin" --version || true)"
 fi
-echo -e "${GREEN}Happy remembering! 🧠✨${NC}"
+if [[ "$prek_version_output" != "prek $PREK_VERSION" ]]; then
+    printf 'Installing prek %s...\n' "$PREK_VERSION"
+    uv tool install --force "prek==$PREK_VERSION"
+    prek_bin="$(uv tool dir --bin)/prek"
+fi
+[[ -x "$prek_bin" ]] || die "prek installation did not create an executable"
+"$prek_bin" validate-config .pre-commit-config.yaml
+"$prek_bin" install --hook-type pre-commit --hook-type pre-push
+unset prek_bin prek_version_output
+
+printf 'Validating Compose configuration...\n'
+docker compose config --quiet
+
+printf 'Starting Neo4j...\n'
+docker compose up -d --wait --wait-timeout "$STARTUP_TIMEOUT_SECONDS" neo4j
+
+voyage_key="$(dotenv_value VOYAGE_API_KEY || true)"
+if [[ -z "$voyage_key" || "$voyage_key" == your_* ]]; then
+    printf 'warning: VOYAGE_API_KEY still needs to be configured in .env\n' >&2
+fi
+unset voyage_key
+
+printf 'Setup complete. Start development with ./run.sh.\n'

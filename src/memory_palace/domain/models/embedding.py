@@ -1,9 +1,9 @@
 """Embedding-related enums shared across the embedding services."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class EmbeddingType(str, Enum):
+class EmbeddingType(StrEnum):
     """Types of embedding vectors."""
 
     DOCUMENT = "document"

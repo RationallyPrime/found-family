@@ -6,7 +6,23 @@ preventing SQL injection and supporting advanced operators.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
+
+from pydantic import JsonValue
+
+from memory_palace.infrastructure.neo4j.identifiers import validate_identifier
+
+_FILTERABLE_FIELDS = frozenset(
+    {
+        "conversation_id",
+        "memory_type",
+        "pinned",
+        "salience",
+        "timestamp",
+        "topic_id",
+    }
+)
+_FILTER_ALIASES = frozenset({"m", "node"})
 
 _OPS = {
     "lt": "<",
@@ -27,7 +43,7 @@ def _param_name(base: str, idx: int) -> str:
     return f"{base}_{idx}"
 
 
-def compile_filters(filters: dict[str, Any] | None, alias: str = "m") -> tuple[str, dict[str, Any]]:
+def compile_filters(filters: dict[str, JsonValue] | None, alias: str = "m") -> tuple[str, dict[str, JsonValue]]:
     """Compile filter dictionary into safe WHERE clause and parameters.
 
     Args:
@@ -36,117 +52,105 @@ def compile_filters(filters: dict[str, Any] | None, alias: str = "m") -> tuple[s
             - Operators: {"field__gt": 5, "field__contains": "text"}
             - Logical groups: {"$or": [...], "$and": [...]}
             - Null checks: {"field": None}
+            Filterable fields are deliberately limited to the properties used
+            by repository callers: conversation_id, memory_type, pinned,
+            salience, timestamp, and topic_id.
         alias: Node alias to use in queries (default: "m")
 
     Returns:
         Tuple of (WHERE clause string, parameters dict)
 
     Examples:
-        >>> compile_filters({"name": "Alice", "age__gt": 18})
-        ("WHERE m.name = $p_0 AND m.age > $p_1", {"p_0": "Alice", "p_1": 18})
+        >>> compile_filters({"pinned": True, "salience__gte": 0.5})
+        ("WHERE m.pinned = $p_0 AND m.salience >= $p_1", {"p_0": True, "p_1": 0.5})
 
-        >>> compile_filters({"$or": [{"type": "A"}, {"type": "B"}]})
-        ("WHERE (m.type = $p_0) OR (m.type = $p_1)", {"p_0": "A", "p_1": "B"})
+        >>> compile_filters({"$or": [{"memory_type": "friend_utterance"}, {"memory_type": "claude_utterance"}]})
+        ('WHERE (m.memory_type = $p_0 OR m.memory_type = $p_1)', {'p_0': 'friend_utterance', 'p_1': 'claude_utterance'})
     """
+    alias = validate_identifier(alias, kind="alias", allowed=_FILTER_ALIASES)
+
     if not filters:
         return "", {}
 
-    clauses: list[str] = []
-    params: dict[str, Any] = {}
+    params: dict[str, JsonValue] = {}
     param_counter = [0]  # Use list to allow modification in nested function
 
-    def add_clause(expr: str, value: Any) -> None:
+    def add_clause(expr: str, value: JsonValue) -> str:
         """Add a clause with parameterized value."""
         param_name = _param_name("p", param_counter[0])
         param_counter[0] += 1
 
         # Replace placeholder with parameter name
         clause = expr.format(param=f"${param_name}")
-        clauses.append(clause)
         params[param_name] = value
+        return clause
 
-    def handle_field_op(field: str, op: str, value: Any) -> None:
+    def handle_field_op(field: str, op: str, value: JsonValue) -> str:
         """Handle field with operator."""
         if op == "overlap":
             # Special handling for list overlap
             param_name = _param_name("p", param_counter[0])
             param_counter[0] += 1
-            clauses.append(f"ANY(x IN ${param_name} WHERE x IN {alias}.{field})")
             params[param_name] = value
-        elif op in ("startswith", "endswith", "contains"):
-            # Text operators
-            add_clause(f"{alias}.{field} {_OPS[op]} {{param}}", value)
-        elif op in _OPS:
-            # Standard comparison operators
-            add_clause(f"{alias}.{field} {_OPS[op]} {{param}}", value)
-        else:
-            # Unknown operator, treat as equality with suffix
-            add_clause(f"{alias}.{field}__{op} = {{param}}", value)
+            return f"ANY(x IN ${param_name} WHERE x IN {alias}.{field})"
+        if op in _OPS:
+            return add_clause(f"{alias}.{field} {_OPS[op]} {{param}}", value)
+        raise ValueError(f"Unknown filter operator: {op!r}")
 
-    def process_filters(filter_dict: dict[str, Any], parent_op: str = "AND") -> list[str]:  # noqa: ARG001
+    def process_filters(filter_dict: dict[str, JsonValue]) -> list[str]:
         """Recursively process filter dictionary."""
-        local_clauses = []
+        local_clauses: list[str] = []
 
         for key, value in filter_dict.items():
             if key == "$or":
                 # OR group
-                if isinstance(value, list):
-                    or_clauses = []
-                    for item in value:
-                        if isinstance(item, dict):
-                            sub_clauses = process_filters(item, "AND")
-                            if sub_clauses:
-                                # Wrap in parens if multiple conditions
-                                if len(sub_clauses) > 1:
-                                    or_clauses.append(f"({' AND '.join(sub_clauses)})")
-                                else:
-                                    or_clauses.append(sub_clauses[0])
-                    if or_clauses:
-                        if len(or_clauses) > 1:
-                            local_clauses.append(f"({' OR '.join(or_clauses)})")
-                        else:
-                            local_clauses.append(or_clauses[0])
+                if not isinstance(value, list) or not value:
+                    raise ValueError("$or must be a non-empty list of non-empty filter dictionaries")
+                or_clauses = []
+                for item in value:
+                    if not isinstance(item, dict) or not item:
+                        raise ValueError("$or must contain only non-empty filter dictionaries")
+                    sub_clauses = process_filters(cast("dict[str, JsonValue]", item))
+                    branch = " AND ".join(sub_clauses)
+                    or_clauses.append(f"({branch})" if len(sub_clauses) > 1 else branch)
+                local_clauses.append(f"({' OR '.join(or_clauses)})")
 
             elif key == "$and":
                 # AND group
-                if isinstance(value, list):
-                    and_clauses = []
-                    for item in value:
-                        if isinstance(item, dict):
-                            sub_clauses = process_filters(item, "AND")
-                            and_clauses.extend(sub_clauses)
-                    if and_clauses:
-                        if len(and_clauses) > 1:
-                            local_clauses.append(f"({' AND '.join(and_clauses)})")
-                        else:
-                            local_clauses.append(and_clauses[0])
+                if not isinstance(value, list) or not value:
+                    raise ValueError("$and must be a non-empty list of non-empty filter dictionaries")
+                and_clauses = []
+                for item in value:
+                    if not isinstance(item, dict) or not item:
+                        raise ValueError("$and must contain only non-empty filter dictionaries")
+                    and_clauses.extend(process_filters(cast("dict[str, JsonValue]", item)))
+                local_clauses.append(f"({' AND '.join(and_clauses)})")
 
             elif "__" in key:
                 # Field with operator
                 field, op = key.split("__", 1)
-                handle_field_op(field, op, value)
+                field = validate_identifier(field, kind="field", allowed=_FILTERABLE_FIELDS)
+                local_clauses.append(handle_field_op(field, op, value))
 
             elif value is None:
                 # NULL check
-                local_clauses.append(f"{alias}.{key} IS NULL")
+                field = validate_identifier(key, kind="field", allowed=_FILTERABLE_FIELDS)
+                local_clauses.append(f"{alias}.{field} IS NULL")
 
             else:
                 # Simple equality
-                add_clause(f"{alias}.{key} = {{param}}", value)
+                field = validate_identifier(key, kind="field", allowed=_FILTERABLE_FIELDS)
+                local_clauses.append(add_clause(f"{alias}.{field} = {{param}}", value))
 
-        # Add any clauses created by handle_field_op
         return local_clauses
 
-    # Process the main filter dictionary
-    process_filters(filters)
-
-    # Build WHERE clause
+    clauses = process_filters(filters)
     where_clause = "WHERE " + " AND ".join(clauses) if clauses else ""
 
     return where_clause, params
 
 
-def merge_params(*param_dicts: dict[str, Any]) -> dict[str, Any]:
+def merge_params(*param_dicts: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """Safely merge multiple parameter dictionaries.
 
     Args:
@@ -158,7 +162,7 @@ def merge_params(*param_dicts: dict[str, Any]) -> dict[str, Any]:
     Raises:
         ValueError: If parameter names conflict with different values
     """
-    result = {}
+    result: dict[str, JsonValue] = {}
     for params in param_dicts:
         for key, value in params.items():
             if key in result and result[key] != value:

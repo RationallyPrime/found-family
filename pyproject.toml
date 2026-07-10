@@ -2,44 +2,30 @@
 name = "memory-palace"
 version = "0.1.0"
 description = "Personal memory palace with persistent ontology"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
     "pydantic>=2.10.0",
-    "pydantic-ai>=0.1.0",
+    "pydantic-ai-slim[anthropic]==1.107.0",
+    "griffe>=1.15.0,<2",
     "neo4j>=5.28.0",
-    "voyageai>=0.3.0",
+    "voyageai>=0.4.1",
     "httpx>=0.28.0",
-    "python-dotenv>=1.0.0",
     "structlog>=25.0.0",
     "apscheduler>=3.10.0",
-    "mcp>=1.0.0",
-    # ML dependencies (add as needed)
-    # "umap-learn>=0.5.0",
-    # "hdbscan>=0.8.0",
-    # "bertopic>=0.16.0",
-    # "sentence-transformers>=3.0.0",
     "logfire>=4.3.3",
-    "ty>=0.0.1a19",
     "pydantic-settings>=2.10.1",
-    "opentelemetry-instrumentation-botocore>=0.57b0",
     "opentelemetry-instrumentation-fastapi>=0.57b0",
-    "opentelemetry-instrumentation-httpx>=0.57b0",
-    "opentelemetry-instrumentation-requests>=0.57b0",
-    "opentelemetry-instrumentation-sqlite3>=0.57b0",
-    "opentelemetry-instrumentation-urllib>=0.57b0",
-    "jose>=1.0.0",
-    "python-jose[cryptography]>=3.5.0",
-    "python-multipart>=0.0.20",
-    "passlib>=1.7.4",
+    "pyjwt[crypto]>=2.13.0",
+    "python-multipart>=0.0.30",
     "scikit-learn>=1.3.0",
     "numpy>=1.24.0",
     "fastapi-mcp>=0.4.0",
+    "mcp>=1.23.0",
 ]
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0.0", "pytest-asyncio>=0.26.0", "ruff>=0.12.9"]
 
 [build-system]
 requires = ["hatchling"]
@@ -62,8 +48,10 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
     "ARG", # flake8-unused-arguments
+    "ANN", # flake8-annotations
     "SIM", # flake8-simplify
     "RUF", # Ruff-specific rules
+    "S",   # flake8-bandit security checks
 ]
 ignore = [
     "B008", # Do not perform function call in argument defaults
@@ -73,7 +61,8 @@ fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"] # Allow unused imports in __init__
-"test_*.py" = ["ARG"]    # Allow unused arguments in tests
+"test_*.py" = ["ARG", "S101"] # Pytest assertions are intentional
+"scripts/*.py" = ["T201"] # Scripts are interactive command-line programs
 
 [tool.ruff.lint.isort]
 known-first-party = ["memory_palace"]
@@ -96,17 +85,10 @@ extra-paths = ["src"]
 include = ["src/**/*.py"]
 exclude = ["__pycache__", ".venv", "build", "dist", "**/tests/**", "docs/*.py"]
 
-[tool.pyright]
-# Pyright configuration (for compatibility)
-venvPath = "."
-venv = ".venv"
-include = ["src"]
-pythonVersion = "3.13"
-typeCheckingMode = "standard"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = ["--strict-config", "--strict-markers"]
 markers = [
     "integration: requires a running Neo4j (docker compose up -d neo4j)",
 ]
@@ -114,5 +96,17 @@ markers = [
 [dependency-groups]
 dev = [
     "hypothesis>=6.100",
+    "pytest>=8.0",
     "pytest-asyncio>=0.26",
+    "pytest-cov>=6.0",
+    "ruff>=0.12.9",
+    "ty>=0.0.1a19",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["memory_palace"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

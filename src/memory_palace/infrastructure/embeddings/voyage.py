@@ -1,10 +1,34 @@
 """Voyage AI embedding service."""
 
-import os
-from typing import Any, cast
+from math import isfinite
+from typing import cast
 
 import voyageai
-from pydantic import ConfigDict, Field
+from voyageai.error import (
+    APIConnectionError as VoyageAPIConnectionError,
+)
+from voyageai.error import (
+    APIError as VoyageAPIError,
+)
+from voyageai.error import (
+    AuthenticationError as VoyageAuthenticationError,
+)
+from voyageai.error import (
+    InvalidRequestError as VoyageInvalidRequestError,
+)
+from voyageai.error import (
+    MalformedRequestError as VoyageMalformedRequestError,
+)
+from voyageai.error import (
+    RateLimitError as VoyageRateLimitError,
+)
+from voyageai.error import (
+    ServerError as VoyageServerError,
+)
+from voyageai.error import (
+    ServiceUnavailableError as VoyageServiceUnavailableError,
+)
+from voyageai.error import Timeout as VoyageTimeout
 
 from memory_palace.core.base import ErrorLevel, ServiceErrorDetails
 from memory_palace.core.circuit_breaker import CircuitBreaker, RetryWithCircuitBreaker
@@ -59,22 +83,19 @@ class VoyageEmbeddingService:
     - Text embeddings (default): Uses voyage-code model
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # Model configuration
-    model: str = Field(default="")  # Will be set in __init__ from settings
-    default_embedding_type: EmbeddingType = Field(default=EmbeddingType.TEXT)
-    # voyageai client doesn't expose a public type, so we use Any here
-    client: Any  # voyageai.AsyncClient
-    cache: EmbeddingCache | None = None
+    model: str
+    default_embedding_type: EmbeddingType
+    client: voyageai.AsyncClient
+    cache: EmbeddingCache | None
 
     # Circuit breaker for API calls
-    _circuit_breaker: CircuitBreaker
-    _retry_handler: RetryWithCircuitBreaker
+    _circuit_breaker: CircuitBreaker[list[list[float]]]
+    _retry_handler: RetryWithCircuitBreaker[list[list[float]]]
 
     @with_error_handling(error_level=ErrorLevel.ERROR)
     def __init__(
         self,
+        api_key: str | None = None,
         model: str | None = None,
         default_embedding_type: EmbeddingType = EmbeddingType.TEXT,
         cache: EmbeddingCache | None = None,
@@ -88,16 +109,8 @@ class VoyageEmbeddingService:
         Raises:
             AuthenticationError: If the API key is not configured
         """
-        # Settings imported at the module level
-
-        # Handle both SecretStr and plain string for API key
-        api_key = settings.voyage_api_key
-        if hasattr(api_key, "get_secret_value"):
-            api_key = str(api_key.get_secret_value())  # type: ignore
-        else:
-            api_key = str(api_key) if api_key else ""
-
-        if not api_key:
+        resolved_api_key = api_key or settings.voyage_api_key_value
+        if not resolved_api_key:
             details = ServiceErrorDetails(
                 source="VoyageEmbeddingService",
                 operation="initialization",
@@ -116,11 +129,7 @@ class VoyageEmbeddingService:
         self.model = model or settings.voyage_model
         self.default_embedding_type = default_embedding_type
 
-        # Set the environment variable for voyageai to pick up
-        os.environ["VOYAGE_API_KEY"] = api_key
-
-        # Initialize the client which will use the environment variable
-        self.client = voyageai.AsyncClient()  # type: ignore
+        self.client = voyageai.AsyncClient(api_key=resolved_api_key, timeout=settings.voyage_timeout_seconds)
         self.cache = cache
 
         # Initialize circuit breaker for API calls
@@ -139,7 +148,7 @@ class VoyageEmbeddingService:
             initial_delay=1.0,
             backoff_factor=2.0,
             max_delay=30.0,
-            retryable_exceptions=(RateLimitError, TimeoutError),
+            retryable_exceptions=(RateLimitError, TimeoutError, ServiceError),
         )
 
     @with_error_handling(error_level=ErrorLevel.ERROR)
@@ -159,11 +168,10 @@ class VoyageEmbeddingService:
             # Pass model name for cache key to prevent cross-model contamination
             cached = await self.cache.get_cached(text, self.model)
             if cached:
-                logger.debug(f"Embedding cache hit for text: {text[:50]}... (model: {self.model})")
-                return cached
+                return self._validate_embeddings([cached])[0]
 
         embeddings = await self._retry_handler.call_async(self._call_voyage_api_internal, [text])
-        embedding = embeddings[0]
+        embedding = self._validate_embeddings(embeddings)[0]
 
         if self.cache:
             # Store with model and dimension metadata
@@ -178,7 +186,38 @@ class VoyageEmbeddingService:
 
         This is wrapped by the circuit breaker.
         """
-        response = await self.client.embed(texts=texts, model=self.model)
+        try:
+            response = await self.client.embed(texts=texts, model=self.model)
+        except VoyageRateLimitError as exc:
+            raise RateLimitError(
+                message="Voyage API rate limit exceeded",
+                details=self._provider_error_details(status_code=429),
+            ) from exc
+        except VoyageAuthenticationError as exc:
+            raise AuthenticationError(
+                message="Voyage API authentication failed",
+                details=self._provider_error_details(status_code=401),
+            ) from exc
+        except (VoyageAPIConnectionError, VoyageServiceUnavailableError, VoyageTimeout) as exc:
+            raise TimeoutError(
+                message="Voyage API is temporarily unavailable",
+                details=self._provider_error_details(status_code=503),
+            ) from exc
+        except VoyageServerError as exc:
+            raise ServiceError(
+                message="Voyage API server failure",
+                details=self._provider_error_details(status_code=502),
+            ) from exc
+        except (VoyageInvalidRequestError, VoyageMalformedRequestError) as exc:
+            raise ProcessingError(
+                message="Voyage API rejected the embedding request",
+                details=self._provider_error_details(status_code=400),
+            ) from exc
+        except VoyageAPIError as exc:
+            raise ServiceError(
+                message="Voyage API request failed",
+                details=self._provider_error_details(status_code=502),
+            ) from exc
 
         embeddings = getattr(response, "embeddings", [])
         if not embeddings or len(embeddings) != len(texts):
@@ -197,7 +236,35 @@ class VoyageEmbeddingService:
             )
 
         # Success! Return the embeddings
-        return [cast("list[float]", emb) for emb in embeddings]
+        return self._validate_embeddings([cast("list[float]", emb) for emb in embeddings])
+
+    @staticmethod
+    def _provider_error_details(status_code: int) -> ServiceErrorDetails:
+        return ServiceErrorDetails(
+            source="voyage_embedding",
+            operation="embed_batch",
+            service_name="voyage",
+            endpoint="/embeddings",
+            status_code=status_code,
+            request_id=None,
+            latency_ms=None,
+        )
+
+    def _validate_embeddings(self, embeddings: list[list[float]]) -> list[list[float]]:
+        """Reject corrupt or cross-model vectors before they reach Neo4j."""
+        dimensions = self.get_model_dimensions()
+        for embedding in embeddings:
+            if len(embedding) != dimensions or not all(isfinite(value) for value in embedding):
+                raise ProcessingError(
+                    message="Voyage API returned an invalid embedding vector",
+                    details={
+                        "source": "voyage_embedding",
+                        "operation": "validate_embedding",
+                        "expected_dimensions": dimensions,
+                        "actual_dimensions": len(embedding),
+                    },
+                )
+        return embeddings
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
@@ -217,87 +284,20 @@ class VoyageEmbeddingService:
         if not texts:
             return []
 
-        # Filter out empty strings
-        valid_texts = [text for text in texts if text.strip()]
-        if not valid_texts:
+        if any(not text.strip() for text in texts):
             raise ProcessingError(
-                message="Batch contains only empty texts",
+                message="Batch contains empty text",
                 details={
                     "source": "voyage_embedding",
                     "operation": "embed_batch",
-                    "original_batch_size": len(texts),
+                    "batch_size": len(texts),
                 },
             )
 
         # Use circuit breaker with retries
         return await self._retry_handler.call_async(
             self._call_voyage_api_internal,
-            valid_texts,
-        )
-
-    def _handle_error(
-        self,
-        e: Exception,
-        batch_index: int,
-        texts: list[str],
-        model: str,
-    ) -> ProcessingError | RateLimitError | TimeoutError | AuthenticationError:
-        """Map errors to our exception types."""
-        error_msg = str(e).lower()
-        # Create proper ServiceErrorDetails for different error types
-        if "rate limit" in error_msg:
-            details = ServiceErrorDetails(
-                source="VoyageEmbeddingService",
-                operation="embed_batch",
-                service_name="Voyage AI",
-                endpoint="/embeddings",
-                status_code=429,  # Rate limit status code
-                request_id=None,
-                latency_ms=None,
-            )
-            return RateLimitError(
-                message="Rate limit exceeded for embeddings API",
-                details=details,
-            )
-        if "timeout" in error_msg or "connection" in error_msg:
-            details = ServiceErrorDetails(
-                source="VoyageEmbeddingService",
-                operation="embed_batch",
-                service_name="Voyage AI",
-                endpoint="/embeddings",
-                status_code=408,  # Timeout status code
-                request_id=None,
-                latency_ms=None,
-            )
-            return TimeoutError(
-                message="Embeddings API request timed out",
-                details=details,
-            )
-        if "auth" in error_msg or "api key" in error_msg:
-            details = ServiceErrorDetails(
-                source="VoyageEmbeddingService",
-                operation="embed_batch",
-                service_name="Voyage AI",
-                endpoint="/embeddings",
-                status_code=401,  # Unauthorized status code
-                request_id=None,
-                latency_ms=None,
-            )
-            return AuthenticationError(
-                message="Authentication failed for embeddings API",
-                details=details,
-            )
-
-        # Default to ProcessingError with dict details
-        error_context: dict[str, Any] = {
-            "batch_index": batch_index,
-            "batch_size": len(texts),
-            "model": model,
-            "original_error": str(e),
-        }
-        return ProcessingError(
-            message=f"Failed to generate embeddings: {e!s}",
-            details=error_context,
+            texts,
         )
 
     async def compute_similarity(
@@ -365,7 +365,10 @@ class VoyageEmbeddingService:
             "voyage-code-2": 1536,
         }
 
-        return MODEL_DIMENSIONS.get(self.model, 1024)  # Default to 1024
+        try:
+            return MODEL_DIMENSIONS[self.model]
+        except KeyError as exc:
+            raise ValueError(f"Unknown Voyage embedding model: {self.model}") from exc
 
     async def close(self) -> None:
         """Close the client connection."""

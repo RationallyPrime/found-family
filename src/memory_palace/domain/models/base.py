@@ -1,7 +1,8 @@
 import contextlib
 import typing
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from memory_palace.domain.models.utils import utc_now
 
 
-class MemoryType(str, Enum):
+class MemoryType(StrEnum):
     """Registry of all memory types in the palace."""
 
     # Core memories
@@ -80,7 +81,7 @@ class GraphModel(BaseModel):
         return props
 
     @classmethod
-    def from_neo4j_record(cls, record: dict):
+    def from_neo4j_record(cls, record: Mapping[str, object]) -> typing.Self:
         """Create instance from Neo4j record."""
         record = dict(record)
 
@@ -102,4 +103,4 @@ class GraphModel(BaseModel):
                 with contextlib.suppress(ValueError):
                     record[key] = UUID(value)
 
-        return cls(**record)
+        return cls.model_validate(record)

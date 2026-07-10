@@ -36,6 +36,10 @@ class SalientMemory(GraphModel):
     # Provenance: which interface wrote this (e.g. "claude.ai", "claude-code")
     source: str | None = None
 
+    # Embedding-space provenance prevents silent same-dimension model mixing.
+    embedding_model: str | None = None
+    embedding_dimensions: int | None = Field(default=None, gt=0)
+
 
 class FriendUtterance(SalientMemory):
     """My friend's thoughts and messages in our conversation."""
@@ -91,6 +95,7 @@ class Consolidation(SalientMemory):
     period_start: datetime | None = None
     period_end: datetime | None = None
     conversation_id: UUID | None = None
+    cohort_fingerprint: str | None = None
 
     def __str__(self) -> str:
         return f"Consolidation('{self.content[:50]}...', sources={len(self.source_ids)})"

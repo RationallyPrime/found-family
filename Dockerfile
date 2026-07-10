@@ -1,68 +1,57 @@
-# Optimized multi-stage build with best practices for Python + uv
-FROM python:3.13-slim-bookworm AS base
+# syntax=docker/dockerfile:1.7
 
-# Builder stage
-FROM base AS builder
+ARG UV_VERSION=0.11.19
+ARG UV_DIGEST=sha256:b46b03ddfcfbf8f547af7e9eaefdf8a39c8cebcba7c98858d3162bd28cf536f6
+ARG DISTROLESS_PYTHON_ROOT_DIGEST=sha256:393cdf69ec7a5e217f837f2ff9b2123e06545d89c6e718c14ad020451fcb1900
+ARG DISTROLESS_PYTHON_NONROOT_DIGEST=sha256:828da6b298ecebf90580c84476c29b847b6432b46dbfaa642726b87ac527ee22
 
-# Install uv from official image (using latest stable)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+FROM ghcr.io/astral-sh/uv:${UV_VERSION}@${UV_DIGEST} AS uv
 
-# Set uv environment for optimal builds
+FROM gcr.io/distroless/python3-debian13:latest@${DISTROLESS_PYTHON_ROOT_DIGEST} AS builder
+
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never
+    UV_PYTHON=/usr/bin/python3.13 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
 
-# Copy only dependency files first (for better layer caching)
+COPY --from=uv /uv /uv
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies only (without the project) using cache mount
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    ["/uv", "sync", "--frozen", "--no-install-project", "--no-dev"]
 
-# Copy the rest of the application
+COPY README.md LICENSE ./
 COPY src/ ./src/
 
-# Install the project itself (will be fast since deps are cached)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    ["/uv", "sync", "--frozen", "--no-dev"]
 
-# Runtime stage
-FROM base
+FROM gcr.io/distroless/python3-debian13:nonroot@${DISTROLESS_PYTHON_NONROOT_DIGEST} AS runtime
 
-# Create non-root user for security
-RUN useradd -m -u 1000 claude && \
-    mkdir -p /app/logs && \
-    chown -R claude:claude /app
+ENV PATH=/app/.venv/bin \
+    PYTHONPATH=/app/src \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1
 
 WORKDIR /app
 
-# Copy only the virtual environment and source from builder
-COPY --from=builder --chown=claude:claude /app/.venv /app/.venv
-COPY --from=builder --chown=claude:claude /app/src /app/src
+COPY --from=builder --chown=65532:65532 /app/.venv /app/.venv
+COPY --from=builder --chown=65532:65532 /app/src /app/src
 
-# Copy configuration files
-COPY --chown=claude:claude pyproject.toml uv.lock ./
+USER 65532:65532
 
-# Set environment
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH=/app/src \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+EXPOSE 8000
+STOPSIGNAL SIGTERM
 
-# Install curl for health checks (minimal overhead)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).close()"]
 
-# Switch to non-root user
-USER claude
-
-# Correct health check endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
-
-# Run the application in production mode
-CMD ["uvicorn", "memory_palace.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "uvicorn"]
+CMD ["memory_palace.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]

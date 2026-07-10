@@ -9,8 +9,25 @@ interpolated from trusted internal enums/models only — never from user input.
 from typing import Any, LiteralString, cast
 
 from memory_palace.core.logging import get_logger
+from memory_palace.infrastructure.neo4j.identifiers import validate_identifier
 
 logger = get_logger(__name__)
+
+_RELATIONSHIP_TYPES = frozenset(
+    {
+        "ANSWERED_BY",
+        "CONSOLIDATED_FROM",
+        "PRECEDES",
+        "RELATES_TO",
+        "SIMILAR_TO",
+        "SOLVED_BY",
+        "VERY_SIMILAR_TO",
+    }
+)
+
+
+def _validated_labels(labels: list[str]) -> str:
+    return ":".join(validate_identifier(label, kind="label") for label in labels)
 
 
 class MemoryQueries:
@@ -33,7 +50,8 @@ class MemoryQueries:
         """
         where_conditions = ["score > $threshold", "NOT node:Archived"]
         if labels:
-            where_conditions.append(f"node:{labels}")
+            label_clause = _validated_labels(labels.split(":"))
+            where_conditions.append(f"node:{label_clause}")
         if additional_filters:
             where_conditions.append(additional_filters)
 
@@ -55,7 +73,7 @@ class MemoryQueries:
         Args:
             labels: Node labels (from GraphModel.labels(), trusted)
         """
-        labels_str = ":".join(labels)
+        labels_str = _validated_labels(labels)
 
         query = f"""
             MERGE (m:{labels_str} {{id: $id}})
@@ -66,9 +84,44 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
+    def store_utterance_batch() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically store an ordered utterance batch and its temporal edges.
+
+        Params: $memories (ordered maps with ``position`` and ``properties``),
+        $create_temporal_links.
+        """
+        query = """
+            UNWIND $memories AS item
+            MERGE (m:Memory {id: item.id})
+            SET m += item.properties
+            FOREACH (_ IN CASE item.memory_type
+                WHEN 'friend_utterance' THEN [1] ELSE [] END | SET m:FriendUtterance)
+            FOREACH (_ IN CASE item.memory_type
+                WHEN 'claude_utterance' THEN [1] ELSE [] END | SET m:ClaudeUtterance)
+            WITH item, m
+            ORDER BY item.position
+            WITH collect(m) AS nodes
+            CALL (nodes) {
+                WITH nodes
+                WHERE $create_temporal_links AND size(nodes) > 1
+                UNWIND range(0, size(nodes) - 2) AS i
+                WITH nodes[i] AS source, nodes[i + 1] AS target
+                MERGE (source)-[r:PRECEDES]->(target)
+                SET r.strength = 1.0
+                RETURN count(r) AS temporal_edges
+                UNION
+                WITH nodes
+                WHERE NOT $create_temporal_links OR size(nodes) <= 1
+                RETURN 0 AS temporal_edges
+            }
+            RETURN [node IN nodes | node.id] AS stored_ids
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
     def get_memory_by_id(labels: list[str]) -> tuple[LiteralString, dict[str, Any]]:
         """Get a specific memory by ID."""
-        labels_str = ":".join(labels)
+        labels_str = _validated_labels(labels)
 
         query = f"""
             MATCH (m:{labels_str} {{id: $id}})
@@ -80,6 +133,11 @@ class MemoryQueries:
     @staticmethod
     def create_relationship(relationship_type: str = "RELATES_TO") -> tuple[LiteralString, dict[str, Any]]:
         """Create (or update) a relationship between two memories."""
+        relationship_type = validate_identifier(
+            relationship_type,
+            kind="relationship type",
+            allowed=_RELATIONSHIP_TYPES,
+        )
         query = f"""
             MATCH (source:Memory {{id: $source_id}})
             MATCH (target:Memory {{id: $target_id}})
@@ -94,6 +152,11 @@ class MemoryQueries:
     def delete_relationship(relationship_type: str | None = None) -> tuple[LiteralString, dict[str, Any]]:
         """Delete relationship(s) between two memories."""
         if relationship_type:
+            relationship_type = validate_identifier(
+                relationship_type,
+                kind="relationship type",
+                allowed=_RELATIONSHIP_TYPES,
+            )
             query = f"""
                 MATCH (source:Memory {{id: $source_id}})-[r:`{relationship_type}`]->(target:Memory {{id: $target_id}})
                 DELETE r
@@ -109,28 +172,12 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
-    def delete_memory(labels: list[str] | None = None) -> tuple[LiteralString, dict[str, Any]]:
-        """Hard-delete a memory and its relationships by id.
-
-        For explicit administrative deletion only — lifecycle machinery
-        archives, it never deletes.
-        """
-        labels_str = ":".join(labels) if labels else "Memory"
-
-        query = f"""
-            MATCH (m:{labels_str} {{id: $id}})
-            DETACH DELETE m
-            """
-
-        return cast(LiteralString, query), {}
-
-    @staticmethod
     def detect_relationships() -> tuple[LiteralString, dict[str, Any]]:
         """Find similar memories for relationship detection."""
         query = """
             CALL db.index.vector.queryNodes('memory_embeddings', 5, $embedding)
             YIELD node, score
-            WHERE node.id <> $id AND score > $threshold
+            WHERE node.id <> $id AND score > $threshold AND NOT node:Archived
             RETURN node AS other, score AS similarity
             ORDER BY similarity DESC
             """
@@ -152,6 +199,9 @@ class MemoryQueries:
 
         Params: $seeds (list of {id, score}), $hop_decay, $limit
         """
+        if not 1 <= depth <= 3:
+            raise ValueError("spread activation depth must be between 1 and 3")
+
         query = f"""
             UNWIND $seeds AS seed
             MATCH (s:Memory {{id: seed.id}})
@@ -220,17 +270,31 @@ class MemoryQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
-    def archive_memory() -> tuple[LiteralString, dict[str, Any]]:
-        """Archive a single memory by id (reversible :Archived label).
+    def memory_exists() -> tuple[LiteralString, dict[str, Any]]:
+        """Check whether a memory exists before external note generation.
 
         Params: $id
         """
         query = """
             MATCH (m:Memory {id: $id})
-            SET m:Archived
-            RETURN count(m) AS archived
+            RETURN count(m) AS found
             """
 
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def archive_memory_with_note() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically archive a memory and persist its idempotent audit note.
+
+        Params: $id, $note_id, $note_properties
+        """
+        query = """
+            MATCH (m:Memory {id: $id})
+            SET m:Archived
+            MERGE (note:Memory:SystemNote {id: $note_id})
+            ON CREATE SET note += $note_properties
+            RETURN count(m) AS archived
+            """
         return cast(LiteralString, query), {}
 
     @staticmethod
@@ -321,7 +385,10 @@ class DreamJobQueries:
         """Find recent memories without topic assignments."""
         query = """
             MATCH (m:Memory)
-            WHERE m.topic_id IS NULL AND m.timestamp > $cutoff
+            WHERE m.topic_id IS NULL
+              AND m.timestamp > $cutoff
+              AND m.embedding IS NOT NULL
+              AND NOT m:Archived
             RETURN m.id AS id, m.embedding AS embedding
             ORDER BY m.timestamp DESC
             LIMIT 500
@@ -337,13 +404,35 @@ class DreamJobQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
+    def assign_topics_batch() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically apply one complete topic snapshot.
+
+        Params: $updates (maps with id and topic_id)
+        """
+        query = """
+            UNWIND $updates AS update
+            MATCH (m:Memory {id: update.id})
+            WITH collect({node: m, topic_id: update.topic_id}) AS matched
+            WHERE size(matched) = size($updates)
+            UNWIND matched AS item
+            WITH item.node AS m, item.topic_id AS topic_id
+            SET m.topic_id = CASE WHEN topic_id = -1 THEN null ELSE topic_id END
+            RETURN count(m) AS updated
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
     def get_all_memories_for_clustering() -> tuple[LiteralString, dict[str, Any]]:
-        """Get all memories with embeddings for clustering."""
+        """Get a bounded, recent non-archived sample for clustering.
+
+        Params: $limit
+        """
         query = """
             MATCH (m:Memory)
-            WHERE m.embedding IS NOT NULL
+            WHERE m.embedding IS NOT NULL AND NOT m:Archived
             RETURN m.id AS id, m.embedding AS embedding, m.topic_id AS current_topic
             ORDER BY m.timestamp DESC
+            LIMIT $limit
             """
 
         return cast(LiteralString, query), {}
@@ -367,7 +456,9 @@ class ConsolidationQueries:
             WITH m ORDER BY m.timestamp
             WITH m.conversation_id AS cohort_key, collect({
                 id: m.id, content: m.content, memory_type: m.memory_type,
-                timestamp: m.timestamp, salience: m.salience
+                timestamp: m.timestamp, salience: m.salience,
+                emotional_valence: m.emotional_valence,
+                emotional_intensity: m.emotional_intensity
             }) AS episodes
             WHERE size(episodes) >= $min_cohort
             RETURN cohort_key, episodes[0..$max_cohort_size] AS episodes
@@ -392,7 +483,9 @@ class ConsolidationQueries:
             WITH m ORDER BY m.timestamp
             WITH toString(toInteger(m.timestamp / 86400.0)) AS cohort_key, collect({
                 id: m.id, content: m.content, memory_type: m.memory_type,
-                timestamp: m.timestamp, salience: m.salience
+                timestamp: m.timestamp, salience: m.salience,
+                emotional_valence: m.emotional_valence,
+                emotional_intensity: m.emotional_intensity
             }) AS episodes
             WHERE size(episodes) >= $min_cohort
             RETURN cohort_key, episodes[0..$max_cohort_size] AS episodes
@@ -403,19 +496,43 @@ class ConsolidationQueries:
         return cast(LiteralString, query), {}
 
     @staticmethod
-    def mark_consolidated() -> tuple[LiteralString, dict[str, Any]]:
-        """Flag source episodes as consolidated (still retrievable).
+    def finalize_consolidation() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically store a consolidation, link sources, and mark them.
 
-        Params: $ids
+        Params: $id, $properties, $source_ids
         """
         query = """
-            UNWIND $ids AS mid
-            MATCH (m:Memory {id: mid})
-            SET m.consolidated = true
-            RETURN count(m) AS marked
+            UNWIND $source_ids AS source_id
+            MATCH (source:Memory {id: source_id})
+            WITH collect(source) AS sources
+            WHERE size(sources) = size($source_ids)
+            MERGE (c:Memory:Consolidation {id: $id})
+            ON CREATE SET c += $properties
+            FOREACH (source IN sources |
+                SET source.consolidated = true
+                MERGE (c)-[:CONSOLIDATED_FROM {strength: 1.0}]->(source)
+            )
+            RETURN c
             """
 
         return cast(LiteralString, query), {}
+
+
+class SchemaQueries:
+    """Database constraints required by repository identity semantics."""
+
+    @staticmethod
+    def create_constraints() -> list[tuple[LiteralString, dict[str, Any]]]:
+        statements = [
+            "CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
+            "CREATE CONSTRAINT oauth_client_id_unique IF NOT EXISTS FOR (c:OAuthClient) REQUIRE c.client_id IS UNIQUE",
+            "CREATE CONSTRAINT oauth_code_unique IF NOT EXISTS FOR (c:OAuthCode) REQUIRE c.code IS UNIQUE",
+            "CREATE CONSTRAINT oauth_refresh_token_unique IF NOT EXISTS FOR (t:OAuthRefreshToken) REQUIRE t.token IS UNIQUE",
+            "CREATE CONSTRAINT embedding_cache_key_unique IF NOT EXISTS FOR (e:EmbeddingCache) REQUIRE e.cache_key IS UNIQUE",
+            "CREATE CONSTRAINT embedding_schema_name_unique IF NOT EXISTS FOR (s:EmbeddingSchema) REQUIRE s.name IS UNIQUE",
+            "CREATE CONSTRAINT consolidation_cohort_unique IF NOT EXISTS FOR (c:Consolidation) REQUIRE c.cohort_fingerprint IS UNIQUE",
+        ]
+        return [(cast(LiteralString, statement), {}) for statement in statements]
 
 
 class OAuthQueries:
@@ -430,7 +547,7 @@ class OAuthQueries:
         """Params: $client_id"""
         query = """
             MATCH (c:OAuthClient {client_id: $client_id})
-            RETURN c.data_json AS data_json
+            RETURN c.client_id AS client_id, c.data_json AS data_json
             """
 
         return cast(LiteralString, query), {}
@@ -457,7 +574,30 @@ class OAuthQueries:
             WHERE stale.expires_at < $now
             DETACH DELETE stale
             WITH count(*) AS _
-            CREATE (c:OAuthCode {code: $code, data_json: $data_json, expires_at: $expires_at})
+            WITH _
+            OPTIONAL MATCH (prior:OAuthCode {client_id: $client_id})
+            DETACH DELETE prior
+            WITH count(*) AS _
+            CREATE (c:OAuthCode {
+                code: $code,
+                client_id: $client_id,
+                data_json: $data_json,
+                expires_at: $expires_at
+            })
+            """
+
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def get_auth_code() -> tuple[LiteralString, dict[str, Any]]:
+        """Fetch a still-valid code without consuming it.
+
+        Params: $code, $now
+        """
+        query = """
+            MATCH (c:OAuthCode {code: $code})
+            WHERE c.expires_at >= $now
+            RETURN c.data_json AS data_json
             """
 
         return cast(LiteralString, query), {}
@@ -477,6 +617,60 @@ class OAuthQueries:
             RETURN data_json, valid
             """
 
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def save_refresh_token() -> tuple[LiteralString, dict[str, Any]]:
+        """Persist one new refresh-token family and purge expired state.
+
+        Params: $token, $client_id, $family_id, $data_json, $expires_at, $now
+        """
+        query = """
+            OPTIONAL MATCH (stale:OAuthRefreshToken)
+            WHERE stale.expires_at < $now
+            DETACH DELETE stale
+            WITH count(*) AS _
+            CREATE (:OAuthRefreshToken {
+                token: $token,
+                client_id: $client_id,
+                family_id: $family_id,
+                data_json: $data_json,
+                expires_at: $expires_at,
+                created_at: $now
+            })
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def rotate_refresh_token() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically rotate a token or revoke its family on reuse.
+
+        Params: $presented_token, $replacement_token, $client_id, $family_id,
+        $data_json, $expires_at, $now
+        """
+        query = """
+            OPTIONAL MATCH (old:OAuthRefreshToken {
+                token: $presented_token,
+                client_id: $client_id,
+                family_id: $family_id
+            })
+            WITH old, old IS NOT NULL AND old.expires_at >= $now AS valid
+            OPTIONAL MATCH (family:OAuthRefreshToken {client_id: $client_id, family_id: $family_id})
+            WITH old, valid, collect(CASE WHEN NOT valid THEN family ELSE null END) AS compromised
+            FOREACH (token IN compromised | DELETE token)
+            FOREACH (_ IN CASE WHEN valid THEN [1] ELSE [] END |
+                DELETE old
+                CREATE (:OAuthRefreshToken {
+                    token: $replacement_token,
+                    client_id: $client_id,
+                    family_id: $family_id,
+                    data_json: $data_json,
+                    expires_at: $expires_at,
+                    created_at: $now
+                })
+            )
+            RETURN valid AS rotated
+            """
         return cast(LiteralString, query), {}
 
 
@@ -527,6 +721,79 @@ class CacheQueries:
         return cast(LiteralString, query), {}
 
 
+class EmbeddingSchemaQueries:
+    """Corpus-level embedding-space compatibility descriptor."""
+
+    @staticmethod
+    def get_descriptor() -> tuple[LiteralString, dict[str, Any]]:
+        query = """
+            MATCH (s:EmbeddingSchema {name: 'memory_embeddings'})
+            RETURN s.model AS model, s.dimensions AS dimensions
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def inspect_corpus() -> tuple[LiteralString, dict[str, Any]]:
+        query = """
+            MATCH (m:Memory)
+            WHERE m.embedding IS NOT NULL
+            RETURN count(m) AS embedded,
+                   collect(DISTINCT m.embedding_model) AS models,
+                   collect(DISTINCT m.embedding_dimensions) AS declared_dimensions,
+                   min(size(m.embedding)) AS min_dimensions,
+                   max(size(m.embedding)) AS max_dimensions,
+                   sum(CASE WHEN m.embedding_model IS NULL OR m.embedding_dimensions IS NULL THEN 1 ELSE 0 END)
+                       AS missing_provenance
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def ensure_descriptor() -> tuple[LiteralString, dict[str, Any]]:
+        query = """
+            MERGE (s:EmbeddingSchema {name: 'memory_embeddings'})
+            ON CREATE SET s.model = $model, s.dimensions = $dimensions, s.created_at = datetime()
+            RETURN s.model AS model, s.dimensions AS dimensions
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def replace_descriptor() -> tuple[LiteralString, dict[str, Any]]:
+        query = """
+            MERGE (s:EmbeddingSchema {name: 'memory_embeddings'})
+            SET s.model = $model, s.dimensions = $dimensions, s.updated_at = datetime()
+            """
+        return cast(LiteralString, query), {}
+
+    @staticmethod
+    def adopt_legacy_provenance() -> tuple[LiteralString, dict[str, Any]]:
+        """Atomically adopt a proven uniform legacy corpus into one vector space."""
+        query = """
+            MATCH (m:Memory)
+            WHERE m.embedding IS NOT NULL
+            WITH collect(m) AS memories,
+                 collect(DISTINCT size(m.embedding)) AS actual_dimensions,
+                 collect(DISTINCT m.embedding_model) AS existing_models,
+                 collect(DISTINCT m.embedding_dimensions) AS existing_declared_dimensions
+            OPTIONAL MATCH (existing:EmbeddingSchema {name: 'memory_embeddings'})
+            WITH memories, actual_dimensions, existing_models, existing_declared_dimensions, existing
+            WHERE size(memories) > 0
+              AND actual_dimensions = [$dimensions]
+              AND (size(existing_models) = 0 OR existing_models = [$model])
+              AND (size(existing_declared_dimensions) = 0 OR existing_declared_dimensions = [$dimensions])
+              AND (existing IS NULL OR (existing.model = $model AND existing.dimensions = $dimensions))
+            FOREACH (memory IN memories |
+                SET memory.embedding_model = $model,
+                    memory.embedding_dimensions = $dimensions
+            )
+            MERGE (schema:EmbeddingSchema {name: 'memory_embeddings'})
+            SET schema.model = $model,
+                schema.dimensions = $dimensions,
+                schema.updated_at = datetime()
+            RETURN size(memories) AS adopted
+            """
+        return cast(LiteralString, query), {}
+
+
 class VectorIndexQueries:
     """Queries for managing Neo4j vector indexes."""
 
@@ -535,9 +802,9 @@ class VectorIndexQueries:
         """Check if vector index exists and get its configuration."""
         query = """
             SHOW INDEXES
-            YIELD name, type, options
-            WHERE name = 'memory_embeddings' AND type = 'VECTOR'
-            RETURN options
+            YIELD name, type, labelsOrTypes, properties, options, state
+            WHERE name = 'memory_embeddings'
+            RETURN type, labelsOrTypes, properties, options, state
             """
 
         return cast(LiteralString, query), {}
@@ -552,6 +819,8 @@ class VectorIndexQueries:
     @staticmethod
     def create_vector_index(dimensions: int) -> tuple[LiteralString, dict[str, Any]]:
         """Create vector index with specified dimensions."""
+        if not 1 <= dimensions <= 4_096:
+            raise ValueError("vector dimensions must be between 1 and 4096")
         query = f"""
             CREATE VECTOR INDEX memory_embeddings IF NOT EXISTS
             FOR (m:Memory) ON m.embedding
@@ -605,7 +874,7 @@ class QueryFactory:
         labels: list[str], filters: dict[str, Any] | None, limit: int, offset: int = 0
     ) -> tuple[str, dict[str, Any]]:
         """Build a filtered recall query."""
-        labels_str = ":".join(labels)
+        labels_str = _validated_labels(labels)
 
         conditions = ["NOT m:Archived"]
         where_params: dict[str, Any] = {}

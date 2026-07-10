@@ -19,7 +19,9 @@ from hypothesis import strategies as st
 from memory_palace.core.constants import SALIENCE_DECAY_LAMBDA_PER_DAY, SALIENCE_FLOOR
 
 
-def decay(salience: float, days: float, floor: float = SALIENCE_FLOOR, lam: float = SALIENCE_DECAY_LAMBDA_PER_DAY) -> float:
+def decay(
+    salience: float, days: float, floor: float = SALIENCE_FLOOR, lam: float = SALIENCE_DECAY_LAMBDA_PER_DAY
+) -> float:
     """Python mirror of the Cypher decay formula."""
     return floor + (salience - floor) * math.exp(-lam * days)
 
@@ -29,7 +31,7 @@ days_st = st.floats(min_value=0.0, max_value=3650.0, allow_nan=False)
 
 
 @given(salience=salience_st, days=days_st)
-def test_decay_bounded(salience: float, days: float):
+def test_decay_bounded(salience: float, days: float) -> None:
     """Decay never leaves [floor, salience]."""
     result = decay(salience, days)
     assert result + 1e-12 >= SALIENCE_FLOOR
@@ -37,7 +39,7 @@ def test_decay_bounded(salience: float, days: float):
 
 
 @given(salience=salience_st, d1=days_st, d2=days_st)
-def test_decay_cadence_independent(salience: float, d1: float, d2: float):
+def test_decay_cadence_independent(salience: float, d1: float, d2: float) -> None:
     """decay(decay(s, d1), d2) == decay(s, d1 + d2).
 
     THE invariant: the trajectory must not depend on how often the dream
@@ -50,20 +52,20 @@ def test_decay_cadence_independent(salience: float, d1: float, d2: float):
 
 
 @given(salience=salience_st, d1=days_st, d2=days_st)
-def test_decay_monotonic_in_time(salience: float, d1: float, d2: float):
+def test_decay_monotonic_in_time(salience: float, d1: float, d2: float) -> None:
     """More elapsed time never yields higher salience."""
     lo, hi = sorted([d1, d2])
     assert decay(salience, hi) <= decay(salience, lo) + 1e-12
 
 
-def test_half_life_is_45_days():
+def test_half_life_is_45_days() -> None:
     """The lambda constant must actually encode a 45-day half-life."""
     start = 1.0
     halfway = decay(start, 45.0, floor=0.0)
     assert math.isclose(halfway, 0.5, rel_tol=0.01)
 
 
-def test_the_original_bug_would_fail_these_invariants():
+def test_the_original_bug_would_fail_these_invariants() -> None:
     """Regression documentation: per-tick decay is cadence-DEPENDENT.
 
     The original code applied factor (1 - 0.0154) once per 5-minute tick.
@@ -81,7 +83,7 @@ def test_the_original_bug_would_fail_these_invariants():
 
 
 @given(salience=st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-def test_reinforcement_asymptotic(salience: float):
+def test_reinforcement_asymptotic(salience: float) -> None:
     """Reinforcement approaches 1.0 but never exceeds it."""
     from memory_palace.core.constants import SALIENCE_REINFORCEMENT_RATE
 

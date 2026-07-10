@@ -45,6 +45,7 @@ from memory_palace.core.config import settings
 from memory_palace.core.logging import get_logger, setup_logging
 from memory_palace.domain.models.memories import Consolidation
 from memory_palace.infrastructure.embeddings.factory import create_embedding_service
+from memory_palace.infrastructure.embeddings.provenance import attach_embedding_provenance
 from memory_palace.infrastructure.repositories.memory import GenericMemoryRepository
 
 setup_logging()
@@ -59,12 +60,29 @@ EMBED_BATCH_SIZE = 50
 
 # Curated emotional tones → valence polarity. Unlisted tones count as neutral.
 TONE_VALENCE = {
-    "warm": 0.8, "playful": 0.7, "joyful": 0.9, "supportive": 0.7,
-    "humorous": 0.6, "affectionate": 0.9, "grateful": 0.8, "excited": 0.7,
-    "curious": 0.4, "engaged": 0.4, "thoughtful": 0.3, "respectful": 0.4,
-    "honest": 0.3, "empathetic": 0.5, "reflective": 0.2, "collaborative": 0.5,
-    "vulnerable": -0.1, "serious": 0.0, "somber": -0.4, "frustrated": -0.5,
-    "difficult": -0.4, "tense": -0.5, "sad": -0.6,
+    "warm": 0.8,
+    "playful": 0.7,
+    "joyful": 0.9,
+    "supportive": 0.7,
+    "humorous": 0.6,
+    "affectionate": 0.9,
+    "grateful": 0.8,
+    "excited": 0.7,
+    "curious": 0.4,
+    "engaged": 0.4,
+    "thoughtful": 0.3,
+    "respectful": 0.4,
+    "honest": 0.3,
+    "empathetic": 0.5,
+    "reflective": 0.2,
+    "collaborative": 0.5,
+    "vulnerable": -0.1,
+    "serious": 0.0,
+    "somber": -0.4,
+    "frustrated": -0.5,
+    "difficult": -0.4,
+    "tense": -0.5,
+    "sad": -0.6,
 }
 
 SALIENCE_BY_SCORE = {5: 0.75, 4: 0.55, 3: 0.45}
@@ -136,23 +154,23 @@ async def run(corpus: Path, min_score: int, dry_run: bool, limit: int | None) ->
         print(f"DRY RUN: would import {len(consolidations)} Consolidation memories")
         return
 
-    driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
-    embeddings = create_embedding_service(neo4j_driver=driver, use_cache=True)
+    driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password_value))
+    imported = 0
+    try:
+        embeddings = create_embedding_service(neo4j_driver=driver, use_cache=True)
+        async with driver.session() as session:
+            repo = GenericMemoryRepository[Consolidation](session)
 
-    async with driver.session() as session:
-        repo = GenericMemoryRepository[Consolidation](session)
-
-        imported = 0
-        for start in range(0, len(consolidations), EMBED_BATCH_SIZE):
-            batch = consolidations[start : start + EMBED_BATCH_SIZE]
-            vectors = await embeddings.embed_batch([c.content for c in batch])
-            for consolidation, vector in zip(batch, vectors, strict=True):
-                consolidation.embedding = vector
-                await repo.remember(consolidation)
-                imported += 1
-            logger.info(f"Imported {imported}/{len(consolidations)}")
-
-    await driver.close()
+            for start in range(0, len(consolidations), EMBED_BATCH_SIZE):
+                batch = consolidations[start : start + EMBED_BATCH_SIZE]
+                vectors = await embeddings.embed_batch([c.content for c in batch])
+                for consolidation, vector in zip(batch, vectors, strict=True):
+                    attach_embedding_provenance(consolidation, vector, embeddings)
+                    await repo.remember(consolidation)
+                    imported += 1
+                logger.info("Curated import progress", imported=imported, total=len(consolidations))
+    finally:
+        await driver.close()
     print(f"Imported {imported} curated memories as Consolidation nodes")
 
 

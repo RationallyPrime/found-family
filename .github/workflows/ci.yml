@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: 0.11.19
+  PYTHON_VERSION: 3.13.5
+  OMP_NUM_THREADS: 1
+  OPENBLAS_NUM_THREADS: 1
+  MKL_NUM_THREADS: 1
+  NUMEXPR_NUM_THREADS: 1
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python
+        run: uv python install "${PYTHON_VERSION}"
+
+      - name: Install just
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+        with:
+          just-version: 1.42.4
+
+      - name: Synchronize locked dependencies
+        run: uv sync --frozen
+
+      - name: Install prek
+        run: uv tool install "prek==0.3.8"
+
+      - name: Run deterministic quality gate
+        env:
+          JWT_SECRET_KEY: ci-only-signing-key-ci-only-signing-key
+        run: just ci
+
+  integration:
+    name: Neo4j Integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      neo4j:
+        image: neo4j:5.26-community-trixie@sha256:4bae36aff76271e27fd6a6ed0835413f86a284cd179cfb1cb7d188f5f7533aca
+        env:
+          NEO4J_AUTH: neo4j/ci-integration-password
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p ci-integration-password 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+          --health-start-period 30s
+    env:
+      NEO4J_URI: bolt://127.0.0.1:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ci-integration-password
+      JWT_SECRET_KEY: ci-only-signing-key-ci-only-signing-key
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python
+        run: uv python install "${PYTHON_VERSION}"
+
+      - name: Synchronize locked dependencies
+        run: uv sync --frozen
+
+      - name: Run Neo4j integration tests
+        run: uv run --frozen pytest -m integration
+
+  container:
+    name: Container Build And Scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs:
+      - quality
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install just
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+        with:
+          just-version: 1.42.4
+
+      - name: Build production image
+        run: docker build --tag memory-palace:ci .
+
+      - name: Verify non-root runtime
+        run: docker run --rm --entrypoint /app/.venv/bin/python memory-palace:ci -c 'import os; assert os.getuid() == 65532'
+
+      - name: Smoke test hardened production topology
+        run: just compose-smoke
+
+      - name: Scan repository
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          version: v0.72.0
+
+      - name: Scan production image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: memory-palace:ci
+          severity: HIGH,CRITICAL
+          # Base-OS CVEs in the distroless image are only fixable by a digest
+          # bump (Dependabot docker ecosystem); unfixed findings are unactionable
+          # here. Our own dependencies stay strict via the fs scan above.
+          ignore-unfixed: true
+          exit-code: "1"
+          version: v0.72.0
+
+      - name: Scan Neo4j image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IGNOREFILE: .trivyignore.yaml
+        with:
+          scan-type: image
+          image-ref: neo4j:5.26-community-trixie@sha256:4bae36aff76271e27fd6a6ed0835413f86a284cd179cfb1cb7d188f5f7533aca
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          version: v0.72.0

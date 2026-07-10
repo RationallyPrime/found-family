@@ -14,14 +14,14 @@ from memory_palace.domain.models.memories import (
 )
 
 
-def test_labels_derive_from_memory_type():
+def test_labels_derive_from_memory_type() -> None:
     assert FriendUtterance(content="x").labels() == ["Memory", "FriendUtterance"]
     assert ClaudeUtterance(content="x").labels() == ["Memory", "ClaudeUtterance"]
     assert Consolidation(content="x").labels() == ["Memory", "Consolidation"]
     assert SystemNote(content="x").labels() == ["Memory", "SystemNote"]
 
 
-def test_neo4j_round_trip_preserves_lifecycle_fields():
+def test_neo4j_round_trip_preserves_lifecycle_fields() -> None:
     original = FriendUtterance(
         content="round trip",
         salience=0.72,
@@ -54,12 +54,10 @@ def test_neo4j_round_trip_preserves_lifecycle_fields():
     assert abs((restored.timestamp - original.timestamp).total_seconds()) < 0.001
 
 
-def test_discriminated_union_routes_by_memory_type():
+def test_discriminated_union_routes_by_memory_type() -> None:
     adapter: TypeAdapter[Memory] = TypeAdapter(Memory)
 
-    friend = adapter.validate_python(
-        {"memory_type": "friend_utterance", "content": "hi", "id": str(uuid4())}
-    )
+    friend = adapter.validate_python({"memory_type": "friend_utterance", "content": "hi", "id": str(uuid4())})
     assert isinstance(friend, FriendUtterance)
 
     consolidation = adapter.validate_python(
@@ -68,7 +66,7 @@ def test_discriminated_union_routes_by_memory_type():
     assert isinstance(consolidation, Consolidation)
 
 
-def test_union_validates_epoch_timestamps_from_neo4j():
+def test_union_validates_epoch_timestamps_from_neo4j() -> None:
     """recall paths validate raw node properties — epoch floats must coerce."""
     adapter: TypeAdapter[Memory] = TypeAdapter(Memory)
     epoch = datetime(2025, 8, 7, 12, 0, tzinfo=UTC).timestamp()
@@ -88,7 +86,7 @@ def test_union_validates_epoch_timestamps_from_neo4j():
     assert isinstance(memory.id, UUID)
 
 
-def test_consolidation_defaults():
+def test_consolidation_defaults() -> None:
     c = Consolidation(content="distilled")
     assert c.source_ids == []
     assert c.pinned is False

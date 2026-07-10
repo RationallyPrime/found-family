@@ -10,9 +10,11 @@ Core hippocampal semantics:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, LiteralString, cast
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING, Any, Literal, LiteralString, cast
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict
 
@@ -37,7 +39,7 @@ from memory_palace.infrastructure.repositories.memory import (
 from memory_palace.services.clustering import DBSCANClusteringService
 
 if TYPE_CHECKING:
-    from neo4j import AsyncSession
+    from neo4j import AsyncResult, AsyncSession
 
     from memory_palace.services import EmbeddingService
 
@@ -60,12 +62,49 @@ class RecallResult(BaseModel):
     score: float = 0.0
 
 
+class PalaceStats(BaseModel):
+    """Typed aggregate returned as part of the awakening snapshot."""
+
+    memory_types: dict[MemoryType, int]
+    total_memories: int = 0
+    archived: int = 0
+    pinned: int = 0
+    relationships: int = 0
+    avg_salience: float | None = None
+    oldest_memory: datetime | None = None
+    newest_memory: datetime | None = None
+
+
+class AwakenSnapshot(BaseModel):
+    """Service-layer continuity reconstruction with a stable shape."""
+
+    pinned: list[Memory]
+    consolidations: list[Memory]
+    salient: list[Memory]
+    recent: list[Memory]
+    stats: PalaceStats
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryWrite:
+    """Service-layer command for one externally authored utterance."""
+
+    content: str
+    role: Literal["user", "assistant"]
+    conversation_id: UUID | None = None
+    salience: float | None = None
+    emotional_valence: float = 0.0
+    emotional_intensity: float = 0.0
+    pinned: bool = False
+    source: str | None = None
+
+
 class MemoryService:
     """Unified memory service with discriminated unions and advanced features."""
 
     def __init__(
         self, session: AsyncSession, embeddings: EmbeddingService, clusterer: DBSCANClusteringService | None = None
-    ):
+    ) -> None:
         self.session = session
         self.embeddings = embeddings
         # Accept clustering service as dependency, don't create a new one
@@ -79,7 +118,7 @@ class MemoryService:
         self.memory_repo = MemoryRepository(session)
         # No relationship_repo needed - relationships are edges, not nodes
 
-    async def run_query(self, query: str, **params):
+    async def run_query(self, query: str, **params: object) -> AsyncResult:
         """Helper method to run queries with proper type casting.
 
         This wraps session.run() to handle the LiteralString requirement
@@ -87,13 +126,13 @@ class MemoryService:
         """
         # Cast to LiteralString for Neo4j driver (trusted internal context)
         trusted_query = cast(LiteralString, query)
-        return await self.session.run(trusted_query, **params)
+        return await self.session.run(trusted_query, cast("dict[str, Any]", params))
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def remember_message(
         self,
         content: str,
-        role: str,
+        role: Literal["user", "assistant"],
         conversation_id: UUID | None = None,
         salience: float | None = None,
         emotional_valence: float = 0.0,
@@ -148,6 +187,8 @@ class MemoryService:
             emotional_intensity=emotional_intensity,
             pinned=pinned,
             source=source,
+            embedding_model=getattr(self.embeddings, "model", None),
+            embedding_dimensions=len(embedding),
         )
 
         if role == "user":
@@ -163,13 +204,85 @@ class MemoryService:
         return memory
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
+    async def remember_batch(
+        self,
+        writes: Sequence[MemoryWrite],
+        *,
+        create_temporal_links: bool = False,
+        auto_classify: bool = True,
+        detect_relationships: bool = True,
+    ) -> list[FriendUtterance | ClaudeUtterance]:
+        """Prepare a batch, then atomically persist every node and temporal edge."""
+        if not writes:
+            raise ValueError("remember_batch requires at least one memory")
+
+        embeddings = await self.embeddings.embed_batch([write.content for write in writes])
+        if len(embeddings) != len(writes):
+            raise ValueError("Embedding provider returned the wrong batch cardinality")
+
+        topic_ids: list[int] = [-1] * len(writes)
+        if self.clusterer is not None and auto_classify:
+            topic_ids = await self.clusterer.predict(embeddings)
+            if len(topic_ids) != len(writes):
+                raise ValueError("Clustering provider returned the wrong batch cardinality")
+
+        from memory_palace.core.constants import SALIENCE_DEFAULT
+
+        memories: list[FriendUtterance | ClaudeUtterance] = []
+        for write, embedding, topic_id in zip(writes, embeddings, topic_ids, strict=True):
+            memory_cls = FriendUtterance if write.role == "user" else ClaudeUtterance
+            memories.append(
+                memory_cls(
+                    id=uuid4(),
+                    content=write.content,
+                    embedding=embedding,
+                    conversation_id=write.conversation_id,
+                    topic_id=topic_id if topic_id != -1 else None,
+                    salience=write.salience if write.salience is not None else SALIENCE_DEFAULT,
+                    emotional_valence=write.emotional_valence,
+                    emotional_intensity=write.emotional_intensity,
+                    pinned=write.pinned,
+                    source=write.source,
+                    embedding_model=getattr(self.embeddings, "model", None),
+                    embedding_dimensions=len(embedding),
+                )
+            )
+
+        query, _ = MemoryQueries.store_utterance_batch()
+        result = await self.run_query(
+            query,
+            memories=[
+                {
+                    "id": str(memory.id),
+                    "memory_type": memory.memory_type.value,
+                    "position": position,
+                    "properties": memory.to_neo4j_properties(),
+                }
+                for position, memory in enumerate(memories)
+            ],
+            create_temporal_links=create_temporal_links,
+        )
+        record = await result.single()
+        stored_ids = [] if record is None else list(record["stored_ids"])
+        expected_ids = [str(memory.id) for memory in memories]
+        if stored_ids != expected_ids:
+            raise RuntimeError("Neo4j did not atomically persist the complete ordered batch")
+
+        if detect_relationships:
+            for memory in memories:
+                await self._detect_and_create_relationships(memory)
+
+        logger.info("Stored memory batch", count=len(memories), temporal_links=create_temporal_links)
+        return memories
+
+    @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def create_relationship(
         self,
         source_id: UUID,
         target_id: UUID,
         relationship_type: str,
         strength: float = 1.0,
-    ):
+    ) -> None:
         """Create a relationship between two memories.
 
         Args:
@@ -197,33 +310,27 @@ class MemoryService:
         """
         logger.info(f"Storing conversation turn for conversation {conversation_id}")
 
-        # Store user message
-        user_memory = await self.remember_message(
-            content=user_content,
-            role="user",
-            conversation_id=conversation_id,
-            salience=salience,
+        memories = await self.remember_batch(
+            [
+                MemoryWrite(
+                    content=user_content,
+                    role="user",
+                    conversation_id=conversation_id,
+                    salience=salience,
+                ),
+                MemoryWrite(
+                    content=assistant_content,
+                    role="assistant",
+                    conversation_id=conversation_id,
+                    salience=salience,
+                ),
+            ],
+            create_temporal_links=True,
             auto_classify=auto_classify,
             detect_relationships=detect_relationships,
         )
-
-        # Store assistant message
-        assistant_memory = await self.remember_message(
-            content=assistant_content,
-            role="assistant",
-            conversation_id=conversation_id,
-            salience=salience,
-            auto_classify=auto_classify,
-            detect_relationships=detect_relationships,
-        )
-
-        # Create PRECEDES relationship between messages
-        await self.create_relationship(
-            source_id=user_memory.id,
-            target_id=assistant_memory.id,
-            relationship_type="PRECEDES",
-            strength=1.0,
-        )
+        user_memory = cast(FriendUtterance, memories[0])
+        assistant_memory = cast(ClaudeUtterance, memories[1])
 
         logger.info(f"Successfully stored turn: user={user_memory.id}, assistant={assistant_memory.id}")
         return (user_memory, assistant_memory)
@@ -458,7 +565,7 @@ class MemoryService:
         recent_days: int = 7,
         recent_limit: int = 10,
         consolidation_limit: int = 5,
-    ) -> dict:
+    ) -> AwakenSnapshot:
         """Session bootstrap: reconstruct continuity for a fresh instance.
 
         Returns the identity anchors (pinned), the story so far
@@ -485,18 +592,18 @@ class MemoryService:
         result = await self.run_query(counts_query)
         type_counts = {record["memory_type"]: record["count"] async for record in result}
 
-        stats: dict = {"memory_types": type_counts}
+        stats_values: dict[str, object] = {"memory_types": type_counts}
         if stats_record:
             oldest = stats_record["oldest"]
             newest = stats_record["newest"]
-            stats.update(
+            stats_values.update(
                 total_memories=stats_record["total"],
                 archived=stats_record["archived"],
                 pinned=stats_record["pinned"],
                 relationships=stats_record["relationships"],
                 avg_salience=round(stats_record["avg_salience"], 3) if stats_record["avg_salience"] else None,
-                oldest_memory=datetime.fromtimestamp(oldest, tz=UTC).isoformat() if oldest else None,
-                newest_memory=datetime.fromtimestamp(newest, tz=UTC).isoformat() if newest else None,
+                oldest_memory=datetime.fromtimestamp(oldest, tz=UTC) if oldest else None,
+                newest_memory=datetime.fromtimestamp(newest, tz=UTC) if newest else None,
             )
 
         logger.info(
@@ -507,13 +614,13 @@ class MemoryService:
             recent=len(recent),
         )
 
-        return {
-            "pinned": pinned,
-            "consolidations": consolidations,
-            "salient": salient,
-            "recent": recent,
-            "stats": stats,
-        }
+        return AwakenSnapshot(
+            pinned=pinned,
+            consolidations=consolidations,
+            salient=salient,
+            recent=recent,
+            stats=PalaceStats.model_validate(stats_values),
+        )
 
     @with_error_handling(error_level=ErrorLevel.ERROR, reraise=True)
     async def forget(self, memory_id: UUID, reason: str) -> bool:
@@ -523,24 +630,36 @@ class MemoryService:
         (reversible, excluded from recall) and a SystemNote documents the
         decision so the act of forgetting is itself remembered.
         """
-        query, _ = MemoryQueries.archive_memory()
+        query, _ = MemoryQueries.memory_exists()
         result = await self.run_query(query, id=str(memory_id))
         record = await result.single()
-        archived = bool(record and record["archived"])
-
-        if archived:
-            note_content = f"Deliberately archived memory {memory_id}: {reason}"
-            embeddings = await self.embeddings.embed_batch([note_content])
-            note = SystemNote(
-                content=note_content,
-                note_type="forgetting",
-                embedding=embeddings[0],
-                related_memory_ids=[memory_id],
-            )
-            await self.note_repo.remember(note)
-            logger.info(f"Archived memory {memory_id}", reason=reason)
-        else:
+        if not record or not record["found"]:
             logger.warning(f"Forget requested for unknown memory {memory_id}")
+            return False
+
+        note_content = f"Deliberately archived memory {memory_id}: {reason}"
+        embedding = (await self.embeddings.embed_batch([note_content]))[0]
+        note = SystemNote(
+            id=uuid5(NAMESPACE_URL, f"memory-palace:forget:{memory_id}:{reason}"),
+            content=note_content,
+            note_type="forgetting",
+            embedding=embedding,
+            related_memory_ids=[memory_id],
+            source="forget-command",
+            embedding_model=getattr(self.embeddings, "model", None),
+            embedding_dimensions=len(embedding),
+        )
+        archive_query, _ = MemoryQueries.archive_memory_with_note()
+        result = await self.run_query(
+            archive_query,
+            id=str(memory_id),
+            note_id=str(note.id),
+            note_properties=note.to_neo4j_properties(),
+        )
+        archive_record = await result.single()
+        archived = bool(archive_record and archive_record["archived"])
+        if archived:
+            logger.info("Archived memory", memory_id=str(memory_id), reason_length=len(reason))
 
         return archived
 

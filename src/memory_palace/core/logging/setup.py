@@ -70,8 +70,8 @@ def setup_logging() -> None:
         structlog.dev.set_exc_info,
         # Add the Logfire processor for structured logging (MUST come before final renderer)
         logfire.StructlogProcessor(),
-        # Final console renderer
-        structlog.dev.ConsoleRenderer(colors=True),
+        # Machine-parseable output in every environment.
+        structlog.processors.JSONRenderer(),
     ]
 
     # Configure structlog
@@ -95,7 +95,7 @@ def setup_logging() -> None:
     # Add structlog's ProcessorFormatter to standard logging
     # This makes standard library logs also go through structlog processors
     formatter = structlog.stdlib.ProcessorFormatter(
-        processor=structlog.dev.ConsoleRenderer(colors=True),
+        processor=structlog.processors.JSONRenderer(),
         foreign_pre_chain=processors[:-2],  # Exclude the Logfire processor and final renderer
     )
 

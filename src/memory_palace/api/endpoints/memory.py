@@ -1,16 +1,20 @@
 """Memory API endpoints."""
 
+from datetime import datetime
+from typing import Literal, Self
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from memory_palace.api.auth import require_read_auth, require_write_auth
 from memory_palace.api.dependencies import get_memory_service
 from memory_palace.core.config import settings
 from memory_palace.core.decorators import with_error_handling
 from memory_palace.core.logging import get_logger
+from memory_palace.domain.models.base import MemoryType
 from memory_palace.domain.models.memories import Memory, TopicCluster
-from memory_palace.services.memory_service import MemoryService
+from memory_palace.services.memory_service import MemoryService, MemoryWrite, PalaceStats
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -20,37 +24,64 @@ _ROLE_NAMES = {
     "claude_utterance": settings.claude_name,
 }
 
+MAX_MEMORY_CONTENT_CHARS = 32_768
+MAX_BATCH_MEMORIES = 50
+MAX_RECALL_RESULTS = 50
+MAX_TOPIC_FILTERS = 100
 
-def _memory_to_dict(msg: Memory) -> dict:
+
+class RequestModel(BaseModel):
+    """Fail-closed defaults for externally supplied request bodies."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class MemoryResponse(BaseModel):
+    """Stable public projection shared by recall and awakening."""
+
+    id: UUID
+    timestamp: datetime
+    memory_type: MemoryType
+    content: str
+    role: str
+    salience: float | None = None
+    pinned: bool = False
+
+
+class ScoredMemoryResponse(MemoryResponse):
+    """Memory projection with retrieval ranking evidence."""
+
+    score: float
+    similarity: float
+    activation: float
+
+
+def _memory_to_response(msg: Memory) -> MemoryResponse:
     """Serialize a memory for API responses."""
-    msg_dict: dict = {
-        "id": str(msg.id),
-        "timestamp": msg.timestamp.isoformat(),
-        "memory_type": msg.memory_type.value,
-    }
-
     if isinstance(msg, TopicCluster):
-        msg_dict["content"] = msg.label or f"Topic Cluster {msg.cluster_id}"
-        msg_dict["role"] = "topic_cluster"
+        content = msg.label or f"Topic Cluster {msg.cluster_id}"
+        role = "topic_cluster"
     else:
-        # FriendUtterance, ClaudeUtterance, SystemNote, Consolidation have .content
-        msg_dict["content"] = msg.content
-        msg_dict["role"] = _ROLE_NAMES.get(msg.memory_type.value, msg.memory_type.value)
+        content = msg.content
+        role = _ROLE_NAMES.get(msg.memory_type.value, msg.memory_type.value)
 
-    salience = getattr(msg, "salience", None)
-    if salience is not None:
-        msg_dict["salience"] = round(salience, 4)
-    if getattr(msg, "pinned", False):
-        msg_dict["pinned"] = True
+    raw_salience = getattr(msg, "salience", None)
+    return MemoryResponse(
+        id=msg.id,
+        timestamp=msg.timestamp,
+        memory_type=msg.memory_type,
+        content=content,
+        role=role,
+        salience=round(raw_salience, 4) if raw_salience is not None else None,
+        pinned=bool(getattr(msg, "pinned", False)),
+    )
 
-    return msg_dict
 
-
-class StoreMemoryRequest(BaseModel):
+class StoreMemoryRequest(RequestModel):
     """Request model for storing a single memory."""
 
-    content: str
-    role: str = Field(..., pattern="^(user|assistant)$", description="Role: 'user' or 'assistant'")
+    content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_CHARS)
+    role: Literal["user", "assistant"] = Field(description="Role: 'user' or 'assistant'")
     conversation_id: UUID | None = None
 
     # Memory importance/salience (0.0-1.0 scale)
@@ -86,44 +117,27 @@ class StoreMemoryRequest(BaseModel):
     )
     source: str | None = Field(
         None,
+        max_length=128,
         description="Which interface is writing this memory (e.g. 'claude.ai', 'claude-code').",
     )
 
-    @field_validator("salience", mode="before")
-    @classmethod
-    def validate_salience(cls, v):
-        # Handle string numbers from JSON/MCP tool conversion
-        if v is None:
-            return v
-        if isinstance(v, str):
-            # Convert string to float without try-except
-            # Let Pydantic handle the ValueError if it's not a valid number
-            return float(v)
-        if isinstance(v, int | float):
-            return v
-        # Raise structured error for invalid types
-        from memory_palace.core.errors import ProcessingError
 
-        raise ProcessingError(
-            message="Salience must be a number between 0.0 and 1.0",
-            details={
-                "source": "memory_endpoint",
-                "operation": "validate_salience",
-                "field": "salience",
-                "actual_value": str(v),
-                "expected_type": "float",
-                "constraint": "0.0 <= salience <= 1.0",
-            },
-        )
-
-
-class StoreBatchRequest(BaseModel):
+class StoreBatchRequest(RequestModel):
     """Request model for storing multiple memories."""
 
-    memories: list[StoreMemoryRequest]
+    memories: list[StoreMemoryRequest] = Field(min_length=1, max_length=MAX_BATCH_MEMORIES)
     create_temporal_links: bool = Field(
         default=False, description="Whether to create PRECEDES relationships between consecutive memories"
     )
+
+    @model_validator(mode="after")
+    def fit_http_request_boundary(self) -> Self:
+        """Reject batches whose compact JSON form cannot fit the HTTP body budget."""
+        reserved_envelope_bytes = 16_384
+        serialized_bytes = len(self.model_dump_json().encode("utf-8"))
+        if serialized_bytes > settings.max_request_body_bytes - reserved_envelope_bytes:
+            raise ValueError("Batch content exceeds the configured HTTP request-body budget")
+        return self
 
 
 class StoreMemoryResponse(BaseModel):
@@ -140,25 +154,61 @@ class StoreBatchResponse(BaseModel):
     message: str = "Memories stored successfully"
 
 
-class SearchRequest(BaseModel):
+class SearchRequest(RequestModel):
     """Request model for searching memories."""
 
-    query: str = Field(..., description="The retrieval cue — what to remember about")
-    k: int = Field(10, description="Maximum memories to return")
-    threshold: float = Field(0.7, description="Minimum semantic similarity for direct matches (0-1)")
+    query: str = Field(min_length=1, max_length=4_096, description="The retrieval cue — what to remember about")
+    k: int = Field(10, ge=1, le=MAX_RECALL_RESULTS, description="Maximum memories to return")
+    threshold: float = Field(
+        0.7,
+        ge=0.0,
+        le=1.0,
+        description="Minimum semantic similarity for direct matches (0-1)",
+    )
 
-    min_salience: float | None = Field(None, description="Only return memories at least this important (0-1)")
-    topic_ids: list[int] | None = Field(None, description="Restrict to specific topic clusters")
+    min_salience: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Only return memories at least this important (0-1)",
+    )
+    topic_ids: list[int] | None = Field(
+        None,
+        max_length=MAX_TOPIC_FILTERS,
+        description="Restrict to specific topic clusters",
+    )
 
 
 class SearchResponse(BaseModel):
     """Response model for search results."""
 
-    messages: list[dict]
+    messages: list[ScoredMemoryResponse]
     count: int
 
 
-@router.post("/remember", response_model=StoreMemoryResponse, operation_id="remember")
+class AwakenResponse(BaseModel):
+    """Public continuity snapshot."""
+
+    identity: list[MemoryResponse]
+    story_so_far: list[MemoryResponse]
+    most_important: list[MemoryResponse]
+    recent: list[MemoryResponse]
+    stats: PalaceStats
+
+
+class ForgetResponse(BaseModel):
+    """Confirmation that an auditable archive operation completed."""
+
+    memory_id: UUID
+    archived: Literal[True] = True
+
+
+@router.post(
+    "/remember",
+    response_model=StoreMemoryResponse,
+    operation_id="remember",
+    dependencies=[Depends(require_write_auth)],
+)
 @with_error_handling(reraise=True)
 async def remember_message(
     request: StoreMemoryRequest,
@@ -189,7 +239,12 @@ async def remember_message(
     return StoreMemoryResponse(memory_id=memory.id)
 
 
-@router.post("/remember/batch", response_model=StoreBatchResponse, operation_id="remember_batch")
+@router.post(
+    "/remember/batch",
+    response_model=StoreBatchResponse,
+    operation_id="remember_batch",
+    dependencies=[Depends(require_write_auth)],
+)
 @with_error_handling(reraise=True)
 async def remember_batch(
     request: StoreBatchRequest,
@@ -203,31 +258,34 @@ async def remember_batch(
         },
     )
 
-    memory_ids = []
-    for idx, mem_request in enumerate(request.memories):
-        memory = await memory_service.remember_message(
-            content=mem_request.content,
-            role=mem_request.role,
-            conversation_id=mem_request.conversation_id,
-            salience=mem_request.salience,
-            emotional_valence=mem_request.emotional_valence,
-            emotional_intensity=mem_request.emotional_intensity,
-            pinned=mem_request.pinned,
-            source=mem_request.source,
-        )
-        memory_ids.append(memory.id)
-
-        # Optionally create PRECEDES relationship between consecutive memories
-        if request.create_temporal_links and idx > 0:
-            await memory_service.create_relationship(
-                source_id=memory_ids[idx - 1], target_id=memory.id, relationship_type="PRECEDES"
+    memories = await memory_service.remember_batch(
+        [
+            MemoryWrite(
+                content=item.content,
+                role=item.role,
+                conversation_id=item.conversation_id,
+                salience=item.salience,
+                emotional_valence=item.emotional_valence,
+                emotional_intensity=item.emotional_intensity,
+                pinned=item.pinned,
+                source=item.source,
             )
+            for item in request.memories
+        ],
+        create_temporal_links=request.create_temporal_links,
+    )
+    memory_ids = [memory.id for memory in memories]
 
     logger.info("Successfully stored batch", extra={"count": len(memory_ids)})
     return StoreBatchResponse(memory_ids=memory_ids)
 
 
-@router.post("/recall", response_model=SearchResponse, operation_id="recall")
+@router.post(
+    "/recall",
+    response_model=SearchResponse,
+    operation_id="recall",
+    dependencies=[Depends(require_read_auth)],
+)
 @with_error_handling(reraise=True)
 async def recall_memories(
     request: SearchRequest,
@@ -240,7 +298,12 @@ async def recall_memories(
     similarity, graph activation, and salience. Recalled memories are
     reinforced: retrieval strengthens them.
     """
-    logger.info("Recalling memories", extra={"query": request.query, "k": request.k, "threshold": request.threshold})
+    logger.info(
+        "Recalling memories",
+        query_length=len(request.query),
+        result_limit=request.k,
+        threshold=request.threshold,
+    )
 
     results = await memory_service.recall(
         query=request.query,
@@ -250,40 +313,54 @@ async def recall_memories(
         topic_ids=request.topic_ids,
     )
 
-    message_dicts = []
+    messages: list[ScoredMemoryResponse] = []
     for r in results:
-        msg_dict = _memory_to_dict(r.memory)
-        msg_dict.update(
-            score=round(r.score, 4),
-            similarity=round(r.similarity, 4),
-            activation=round(r.activation, 4),
+        memory_response = _memory_to_response(r.memory)
+        messages.append(
+            ScoredMemoryResponse(
+                id=memory_response.id,
+                timestamp=memory_response.timestamp,
+                memory_type=memory_response.memory_type,
+                content=memory_response.content,
+                role=memory_response.role,
+                salience=memory_response.salience,
+                pinned=memory_response.pinned,
+                score=round(r.score, 4),
+                similarity=round(r.similarity, 4),
+                activation=round(r.activation, 4),
+            )
         )
-        message_dicts.append(msg_dict)
 
     logger.info("Recall completed", extra={"result_count": len(results)})
 
     return SearchResponse(
-        messages=message_dicts,
-        count=len(message_dicts),
+        messages=messages,
+        count=len(messages),
     )
 
 
-class ForgetRequest(BaseModel):
+class ForgetRequest(RequestModel):
     """Request model for deliberately archiving a memory."""
 
     memory_id: UUID
     reason: str = Field(
         ...,
         min_length=3,
+        max_length=2_048,
         description="Why this memory is being archived. Recorded permanently as a SystemNote.",
     )
 
 
-@router.get("/awaken", operation_id="awaken")
+@router.get(
+    "/awaken",
+    response_model=AwakenResponse,
+    operation_id="awaken",
+    dependencies=[Depends(require_read_auth)],
+)
 @with_error_handling(reraise=True)
 async def awaken(
     memory_service: MemoryService = Depends(get_memory_service),
-) -> dict:
+) -> AwakenResponse:
     """Wake up: reconstruct continuity at the start of a session.
 
     Returns identity anchors (pinned memories), the story so far
@@ -295,31 +372,36 @@ async def awaken(
 
     seen: set[str] = set()
 
-    def render(memories: list) -> list[dict]:
-        rendered = []
+    def render(memories: list[Memory]) -> list[MemoryResponse]:
+        rendered: list[MemoryResponse] = []
         for m in memories:
             key = str(m.id)
             if key in seen:
                 continue
             seen.add(key)
-            rendered.append(_memory_to_dict(m))
+            rendered.append(_memory_to_response(m))
         return rendered
 
-    return {
-        "identity": render(sections["pinned"]),
-        "story_so_far": render(sections["consolidations"]),
-        "most_important": render(sections["salient"]),
-        "recent": render(sections["recent"]),
-        "stats": sections["stats"],
-    }
+    return AwakenResponse(
+        identity=render(sections.pinned),
+        story_so_far=render(sections.consolidations),
+        most_important=render(sections.salient),
+        recent=render(sections.recent),
+        stats=sections.stats,
+    )
 
 
-@router.post("/forget", operation_id="forget")
+@router.post(
+    "/forget",
+    response_model=ForgetResponse,
+    operation_id="forget",
+    dependencies=[Depends(require_write_auth)],
+)
 @with_error_handling(reraise=True)
 async def forget_memory(
     request: ForgetRequest,
     memory_service: MemoryService = Depends(get_memory_service),
-) -> dict:
+) -> ForgetResponse:
     """Deliberately archive a memory (reversible), recording why.
 
     The memory is excluded from future recall but never destroyed. The
@@ -330,4 +412,4 @@ async def forget_memory(
     if not archived:
         raise HTTPException(status_code=404, detail=f"Memory {request.memory_id} not found")
 
-    return {"message": f"Memory {request.memory_id} archived", "reason": request.reason}
+    return ForgetResponse(memory_id=request.memory_id)

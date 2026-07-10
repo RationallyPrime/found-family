@@ -5,13 +5,13 @@ from collections.abc import AsyncGenerator
 from fastapi import HTTPException
 from neo4j import AsyncDriver
 
-from memory_palace.infrastructure.embeddings.factory import EmbeddingServiceProvider
+from memory_palace.domain.protocols import EmbeddingService
 from memory_palace.services.clustering import DBSCANClusteringService
 from memory_palace.services.memory_service import MemoryService
 
 # These will be set by the main.py lifespan
 neo4j_driver: AsyncDriver | None = None
-embedding_service: EmbeddingServiceProvider | None = None
+embedding_service: EmbeddingService | None = None
 clustering_service: DBSCANClusteringService | None = None
 
 

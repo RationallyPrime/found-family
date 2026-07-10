@@ -40,23 +40,9 @@ palace_name:
   help: What would you like to name this Memory Palace?
   default: "{{ friend_name }}'s Memory Palace"
 
-# Neo4j configuration
-neo4j_password:
-  type: str
-  help: Set a password for your Neo4j database
-  secret: true
-  default: password
-
 voyage_api_key:
   type: str
   help: Enter your Voyage AI API key (for embeddings)
-  secret: true
-  default: ""
-
-# Additional API keys (optional)
-openai_api_key:
-  type: str
-  help: OpenAI API key (optional)
   secret: true
   default: ""
 
@@ -66,30 +52,12 @@ anthropic_api_key:
   secret: true
   default: ""
 
-gemini_api_key:
-  type: str
-  help: Google Gemini API key (optional)
-  secret: true
-  default: ""
-
 logfire_token:
   type: str
   help: Logfire token for logging (optional)
   secret: true
   default: ""
 
-tailscale_authkey:
-  type: str
-  help: Tailscale auth key for remote access (optional)
-  secret: true
-  default: ""
-
-claude_api_key:
-  type: str
-  help: Create a secure key for Claude to connect from claude.ai (random string recommended)
-  secret: true
-  default: "{{ 'mp_' + friend_name.lower().replace(' ', '_') + '_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)) }}"
-
 # Files to generate
 _templates:
-  - .env.jinja
+  - memory-palace.env.jinja

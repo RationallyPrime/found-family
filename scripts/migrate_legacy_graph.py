@@ -19,15 +19,13 @@ database. This script:
 Take a backup first (scripts/backup_graph.py). Idempotent: safe to re-run.
 
 Usage:
-    uv run python scripts/migrate_legacy_graph.py [--dry-run]
+    uv run python scripts/migrate_legacy_graph.py          # read-only plan
+    uv run python scripts/migrate_legacy_graph.py --apply  # mutate the graph
 """
 
+import argparse
 import asyncio
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.parent))
 
 from neo4j import AsyncGraphDatabase, AsyncSession
 
@@ -95,7 +93,7 @@ async def rescue_messages(session: AsyncSession, now: float, dry_run: bool) -> i
                 m.emotional_valence = 0.0,
                 m.emotional_intensity = 0.0,
                 m.source = 'legacy-migration'
-            """,  # noqa: S608 - labels from trusted mapping
+            """,
             id=msg["id"],
             content=msg["content"],
             embedding=msg["embedding"],
@@ -140,7 +138,7 @@ async def relabel_legacy(session: AsyncSession, dry_run: bool) -> dict[str, int]
     counts = {}
     for old, new in [("UserUtterance", "FriendUtterance"), ("AssistantUtterance", "ClaudeUtterance")]:
         if dry_run:
-            result = await session.run(f"MATCH (m:Memory:{old}) RETURN count(m) AS c")  # noqa: S608
+            result = await session.run(f"MATCH (m:Memory:{old}) RETURN count(m) AS c")
         else:
             result = await session.run(
                 f"""
@@ -148,7 +146,7 @@ async def relabel_legacy(session: AsyncSession, dry_run: bool) -> dict[str, int]
                 REMOVE m:{old}
                 SET m:{new}
                 RETURN count(m) AS c
-                """  # noqa: S608 - trusted label constants
+                """
             )
         record = await result.single()
         counts[f"{old}→{new}"] = record["c"] if record else 0
@@ -158,9 +156,7 @@ async def relabel_legacy(session: AsyncSession, dry_run: bool) -> dict[str, int]
 async def unify_edges(session: AsyncSession, dry_run: bool) -> int:
     """Memory-to-Memory FOLLOWED_BY edges become PRECEDES (u before a)."""
     if dry_run:
-        result = await session.run(
-            "MATCH (a:Memory)-[r:FOLLOWED_BY]->(b:Memory) RETURN count(r) AS c"
-        )
+        result = await session.run("MATCH (a:Memory)-[r:FOLLOWED_BY]->(b:Memory) RETURN count(r) AS c")
     else:
         result = await session.run(
             """
@@ -178,9 +174,7 @@ async def unify_edges(session: AsyncSession, dry_run: bool) -> int:
 async def backfill_lifecycle(session: AsyncSession, now: float, dry_run: bool) -> int:
     """Give every Memory node the lifecycle fields the new code expects."""
     if dry_run:
-        result = await session.run(
-            "MATCH (m:Memory) WHERE m.salience_updated_at IS NULL RETURN count(m) AS c"
-        )
+        result = await session.run("MATCH (m:Memory) WHERE m.salience_updated_at IS NULL RETURN count(m) AS c")
     else:
         result = await session.run(
             """
@@ -216,9 +210,7 @@ async def remove_shells(session: AsyncSession, dry_run: bool) -> int:
         return 0
 
     if dry_run:
-        result = await session.run(
-            "MATCH (n) WHERE n:Conversation OR n:Turn OR n:Message RETURN count(n) AS c"
-        )
+        result = await session.run("MATCH (n) WHERE n:Conversation OR n:Turn OR n:Message RETURN count(n) AS c")
     else:
         result = await session.run(
             """
@@ -234,9 +226,7 @@ async def remove_shells(session: AsyncSession, dry_run: bool) -> int:
 
 async def main(dry_run: bool) -> None:
     now = datetime.now(UTC).timestamp()
-    driver = AsyncGraphDatabase.driver(
-        settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password)
-    )
+    driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password_value))
 
     async with driver.session() as session:
         rescued = await rescue_messages(session, now, dry_run)
@@ -256,4 +246,7 @@ async def main(dry_run: bool) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main(dry_run="--dry-run" in sys.argv))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="Apply the migration; default is a read-only dry run")
+    arguments = parser.parse_args()
+    asyncio.run(main(dry_run=not arguments.apply))
