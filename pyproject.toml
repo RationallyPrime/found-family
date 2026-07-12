@@ -9,7 +9,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
     "pydantic>=2.10.0",
-    "pydantic-ai-slim[anthropic,openai]==1.107.0",
+    "pydantic-ai-slim[anthropic,openai]==2.9.0",
     "griffe>=1.15.0,<2",
     "neo4j>=5.28.0",
     "voyageai>=0.4.1",
