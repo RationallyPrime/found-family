@@ -48,7 +48,7 @@ repos:
       - id: pytest
         name: pytest (non-integration)
         entry: >-
-          env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+          env PYTHONPATH=src OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
           NUMEXPR_NUM_THREADS=1 uv run --frozen pytest -m not\ integration
         language: system
         pass_filenames: false

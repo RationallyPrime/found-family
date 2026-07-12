@@ -103,7 +103,7 @@ class DreamJobOrchestrator:
                 max_instances=1,
             )
         else:
-            logger.info("Consolidation job not scheduled: no Anthropic API key configured")
+            logger.info("Consolidation job not scheduled: selected provider has no API key configured")
 
     async def start(self) -> None:
         await self.nightly_recluster()

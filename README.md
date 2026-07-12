@@ -21,7 +21,8 @@ That's what this is.
 - **FastAPI Backend**: RESTful API for memory operations
 - **Neo4j Graph Database**: Stores memories as interconnected nodes, enabling both semantic and structural navigation
 - **Voyage AI Embeddings**: Semantic understanding and similarity search
-- **MCP Integration**: Direct integration with Claude through Model Context Protocol
+- **Provider-neutral Consolidation**: OpenAI by default, with Anthropic retained as an alternative
+- **MCP Integration**: Direct integration with Claude and Codex through Model Context Protocol
 
 ### The Memory Model
 
@@ -53,6 +54,7 @@ interface MemoryChunk {
 - Python 3.13+
 - Docker and Docker Compose
 - Voyage AI API key
+- OpenAI API key for the default consolidation dream job (optional until dream jobs are enabled)
 - UV package manager (will be installed automatically if not present)
 
 ### Installation

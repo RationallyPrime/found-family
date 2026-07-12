@@ -22,8 +22,8 @@ See `docs/RENOVATION.md` for the July 2026 renovation design (retain/shed/add ra
    ranking blends `0.6·similarity + 0.25·activation + 0.15·salience`.
    **Retrieval IS reconsolidation**: recalled memories get `access_count += 1`,
    `last_accessed = now`, and an asymptotic salience boost.
-3. **Consolidate** (nightly dream job): cohorts of related episodes are distilled by a
-   Claude model (pydantic-ai) into first-person `Consolidation` memories linked via
+3. **Consolidate** (nightly dream job): cohorts of related episodes are distilled by the
+   configured pydantic-ai model into first-person `Consolidation` memories linked via
    `CONSOLIDATED_FROM`; sources stay retrievable and are flagged `consolidated`.
 4. **Decay** (dream job): `salience(t) = floor + (s - floor)·exp(-λ·days_elapsed)`,
    anchored per-node at `salience_updated_at`. λ = ln(2)/45 (45-day half-life).
@@ -82,13 +82,15 @@ uv run pytest -m integration      # needs running Neo4j
 - Backup before graph surgery: `uv run python scripts/backup_graph.py` → `data/backups/`
 - Dream jobs: disabled when `DISABLE_DREAM_JOBS=true` (env). Jobs: `salience_decay`
   (6h), `cluster_recent` (1h), `nightly_recluster` (03:00), `consolidation` (03:30,
-  needs `ANTHROPIC_API_KEY`). There is no manual trigger endpoint; jobs run on schedule.
+  needs the API key matching `CONSOLIDATION_MODEL`). There is no manual trigger endpoint;
+  jobs run on schedule.
 
 ## Environment Variables (.env)
 
 Required: `VOYAGE_API_KEY`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
-Optional: `ANTHROPIC_API_KEY` (consolidation), `CONSOLIDATION_MODEL`
-(default `anthropic:claude-sonnet-5`), `LOGFIRE_TOKEN`, `DISABLE_DREAM_JOBS`,
+Optional: `OPENAI_API_KEY` (default consolidation provider), `ANTHROPIC_API_KEY`
+(alternative consolidation provider), `CONSOLIDATION_MODEL` (default `openai-responses:gpt-5-mini`),
+`LOGFIRE_TOKEN`, `DISABLE_DREAM_JOBS`,
 `FRIEND_NAME` / `CLAUDE_NAME` (personalization).
 
 ## Query Architecture Rules — CRITICAL

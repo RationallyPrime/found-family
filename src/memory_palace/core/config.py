@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     # API Keys
     voyage_api_key: SecretStr = SecretStr("")
     anthropic_api_key: SecretStr = SecretStr("")
+    openai_api_key: SecretStr = SecretStr("")
     logfire_token: SecretStr = SecretStr("")
 
     # Neo4j
@@ -88,7 +89,7 @@ class Settings(BaseSettings):
     voyage_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
 
     # Consolidation dream job (episodic -> semantic distillation)
-    consolidation_model: str = "anthropic:claude-sonnet-5"
+    consolidation_model: str = "openai-responses:gpt-5-mini"
 
     # Personalization
     friend_name: str = Field(default="Hákon", description="Name of the person using this Memory Palace")
@@ -122,6 +123,33 @@ class Settings(BaseSettings):
     def anthropic_api_key_value(self) -> str:
         """Return the Anthropic secret only at the provider boundary."""
         return self.anthropic_api_key.get_secret_value()
+
+    @property
+    def openai_api_key_value(self) -> str:
+        """Return the OpenAI secret only at the provider boundary."""
+        return self.openai_api_key.get_secret_value()
+
+    @property
+    def consolidation_provider(self) -> str:
+        """Return the supported provider selected by CONSOLIDATION_MODEL."""
+        model_provider, separator, model_name = self.consolidation_model.partition(":")
+        model_provider = model_provider.lower()
+        provider_aliases = {
+            "anthropic": "anthropic",
+            "openai": "openai",
+            "openai-chat": "openai",
+            "openai-responses": "openai",
+        }
+        if not separator or not model_name or model_provider not in provider_aliases:
+            raise ValueError("CONSOLIDATION_MODEL must use a supported Anthropic or OpenAI provider prefix")
+        return provider_aliases[model_provider]
+
+    @property
+    def consolidation_api_key_value(self) -> str:
+        """Return the credential for the selected consolidation provider."""
+        if self.consolidation_provider == "openai":
+            return self.openai_api_key_value
+        return self.anthropic_api_key_value
 
     @property
     def jwt_secret_key_value(self) -> str:

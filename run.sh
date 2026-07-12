@@ -9,6 +9,7 @@ readonly ENV_FILE="${MEMORY_PALACE_ENV_FILE:-$ROOT_DIR/.env}"
 
 cd "$ROOT_DIR"
 export MEMORY_PALACE_ENV_FILE="$ENV_FILE"
+export PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
 app_pid=""
 neo4j_started_here=false

@@ -9,14 +9,41 @@ def test_secrets_are_redacted_from_settings_repr() -> None:
     config = Settings(
         _env_file=None,
         voyage_api_key="voyage-secret",
+        openai_api_key="openai-secret",
         neo4j_password="database-secret",  # noqa: S106 - isolated test fixture
         jwt_secret_key="j" * 48,
     )
 
     rendered = repr(config)
     assert "voyage-secret" not in rendered
+    assert "openai-secret" not in rendered
     assert "database-secret" not in rendered
     assert "j" * 48 not in rendered
+
+
+@pytest.mark.parametrize(
+    "model,provider,key_field,key_value",
+    [
+        ("openai-responses:gpt-5-mini", "openai", "openai_api_key", "openai-secret"),
+        ("openai-chat:gpt-5-mini", "openai", "openai_api_key", "openai-secret"),
+        ("anthropic:claude-sonnet-5", "anthropic", "anthropic_api_key", "anthropic-secret"),
+    ],
+)
+def test_consolidation_provider_selects_matching_credential(
+    model: str, provider: str, key_field: str, key_value: str
+) -> None:
+    config = Settings(_env_file=None, consolidation_model=model, **{key_field: key_value})
+
+    assert config.consolidation_provider == provider
+    assert config.consolidation_api_key_value == key_value
+
+
+@pytest.mark.parametrize("model", ["gpt-5-mini", "gemini:model", "openai-responses:"])
+def test_consolidation_provider_rejects_unsupported_model_specifier(model: str) -> None:
+    config = Settings(_env_file=None, consolidation_model=model)
+
+    with pytest.raises(ValueError, match="CONSOLIDATION_MODEL"):
+        _ = config.consolidation_provider
 
 
 def test_trusted_hosts_include_only_explicit_and_internal_authorities() -> None:

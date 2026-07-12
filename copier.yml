@@ -46,9 +46,15 @@ voyage_api_key:
   secret: true
   default: ""
 
+openai_api_key:
+  type: str
+  help: OpenAI API key for consolidation (optional)
+  secret: true
+  default: ""
+
 anthropic_api_key:
   type: str
-  help: Anthropic API key (optional)  
+  help: Anthropic API key for consolidation (optional alternative)
   secret: true
   default: ""
 
