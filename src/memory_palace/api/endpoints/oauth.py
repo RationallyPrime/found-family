@@ -150,7 +150,12 @@ def _redirect_with_parameters(redirect_uri: str, parameters: dict[str, str]) -> 
 
 
 def _is_native_loopback_redirect(redirect_uri: str) -> bool:
-    """Validate an RFC 8252-style HTTP callback on a literal loopback IP."""
+    """Validate an RFC 8252-style HTTP callback on loopback.
+
+    Accepts literal loopback IPs and the bare "localhost" host: RFC 8252 §7.3
+    prefers the literal, but deployed MCP clients (Claude Code's SDK) bind
+    their ephemeral callback listener on localhost.
+    """
     if not 1 <= len(redirect_uri) <= _MAX_REDIRECT_URI_CHARS or _has_control_characters(redirect_uri):
         return False
     try:
@@ -171,7 +176,7 @@ def _is_native_loopback_redirect(redirect_uri: str) -> bool:
     try:
         return ip_address(host).is_loopback
     except ValueError:
-        return False
+        return host.lower() == "localhost"
 
 
 def _has_control_characters(value: str) -> bool:
@@ -372,6 +377,11 @@ async def register_client(
         _is_native_loopback_redirect(uri) for uri in request.redirect_uris
     )
     if not configured_redirects and not native_loopback_redirects:
+        logger.warning(
+            "OAuth registration rejected",
+            redirect_uris=list(request.redirect_uris),
+            application_type=request.application_type,
+        )
         raise OAuthProtocolError("invalid_redirect_uri", "redirect_uri is not approved for this server")
 
     scopes = _parse_scopes(request.scope)

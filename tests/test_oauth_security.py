@@ -255,11 +255,11 @@ async def test_shared_native_client_revalidates_redirect_on_authorization(redire
 @pytest.mark.parametrize(
     "redirect_uri",
     [
-        "http://localhost:43119/callback/DSMTT-6Ywhkd",
+        "http://localhost.attacker.invalid:43119/callback/DSMTT-6Ywhkd",
         "http://192.168.1.2:43119/callback/DSMTT-6Ywhkd",
     ],
 )
-async def test_native_registration_rejects_non_literal_or_non_loopback_http_callback(redirect_uri: str) -> None:
+async def test_native_registration_rejects_non_loopback_http_callback(redirect_uri: str) -> None:
     with pytest.raises(HTTPException, match="redirect"):
         await register_client(
             _registration(
@@ -280,12 +280,19 @@ async def test_registration_cannot_downgrade_canonical_scopes() -> None:
     assert store.clients == {}
 
 
-async def test_undeclared_application_type_with_loopback_canonicalizes_to_native() -> None:
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "http://127.0.0.1:33418/callback",
+        "http://localhost:33418/callback",
+    ],
+)
+async def test_undeclared_application_type_with_loopback_canonicalizes_to_native(redirect_uri: str) -> None:
     """RFC 8252 §7.3: the loopback callback is the native signature even when application_type is omitted."""
     store = InMemoryOAuthStateStore()
 
     registration = await register_client(
-        _registration(redirect_uris=["http://127.0.0.1:33418/callback"]),
+        _registration(redirect_uris=[redirect_uri]),
         store,
     )
 
