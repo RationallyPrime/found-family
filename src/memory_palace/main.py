@@ -12,8 +12,9 @@ from contextlib import asynccontextmanager
 
 import logfire
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi_mcp import AuthConfig, FastApiMCP
 from neo4j import AsyncDriver
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -198,6 +199,16 @@ app.include_router(memory.router, prefix="/api/v1/memory", tags=["memory"])
 app.include_router(core.router)
 app.include_router(admin.router)
 app.include_router(oauth.router)  # Include OAuth endpoints for Claude.ai MCP
+
+
+@app.exception_handler(oauth.OAuthProtocolError)
+async def oauth_protocol_error_handler(_request: Request, exc: oauth.OAuthProtocolError) -> JSONResponse:
+    """Render OAuth endpoint failures in the RFC 6749/7591 error shape."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.error, "error_description": exc.detail},
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
 
 # Add MCP support — expose only the memory verbs as tools.
 # OAuth/discovery endpoints stay HTTP-only; a memory palace's tool list

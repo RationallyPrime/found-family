@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse, Response
 from memory_palace.api.endpoints.oauth import (
     ClientRegistrationRequest,
     ClientRegistrationResponse,
+    OAuthProtocolError,
     RequestRateLimiter,
     TokenResponse,
     authorize,
@@ -277,6 +278,30 @@ async def test_registration_cannot_downgrade_canonical_scopes() -> None:
         await register_client(_registration(scope="read"), store)
 
     assert store.clients == {}
+
+
+async def test_undeclared_application_type_with_loopback_canonicalizes_to_native() -> None:
+    """RFC 8252 §7.3: the loopback callback is the native signature even when application_type is omitted."""
+    store = InMemoryOAuthStateStore()
+
+    registration = await register_client(
+        _registration(redirect_uris=["http://127.0.0.1:33418/callback"]),
+        store,
+    )
+
+    assert registration.client_id == "client_native_loopback"
+    assert registration.application_type == "native"
+    assert store.clients == {}
+
+
+async def test_registration_errors_carry_rfc7591_error_codes() -> None:
+    with pytest.raises(OAuthProtocolError) as redirect_error:
+        await register_client(_registration(redirect_uris=["https://attacker.invalid/callback"]), InMemoryOAuthStateStore())
+    with pytest.raises(OAuthProtocolError) as scope_error:
+        await register_client(_registration(scope="read"), InMemoryOAuthStateStore())
+
+    assert redirect_error.value.error == "invalid_redirect_uri"
+    assert scope_error.value.error == "invalid_client_metadata"
 
 
 @pytest.mark.parametrize(

@@ -57,6 +57,19 @@ _CLAUDE_CALLBACKS = frozenset(
 )
 
 
+class OAuthProtocolError(HTTPException):
+    """Protocol failure rendered in the RFC 6749 §5.2 / RFC 7591 §3.2.2 shape.
+
+    FastAPI's default handler emits ``{"detail": ...}``, which OAuth clients
+    cannot parse as an error response; the app-level handler in main.py renders
+    ``{"error", "error_description"}`` instead.
+    """
+
+    def __init__(self, error: str, description: str, status_code: int = 400) -> None:
+        super().__init__(status_code=status_code, detail=description)
+        self.error = error
+
+
 class RequestRateLimiter:
     """Bounded fixed-window limiter for credential and state endpoints."""
 
@@ -352,15 +365,18 @@ async def register_client(
 ) -> ClientRegistrationResponse:
     """Register one server-canonical public-client shape."""
     configured_redirects = set(request.redirect_uris).issubset(settings.allowed_redirect_uri_values)
-    native_loopback_redirects = request.application_type == "native" and all(
+    # RFC 8252 §7.3: a literal-loopback HTTP callback is itself the native-client
+    # signature, so clients that omit application_type (the MCP SDK CLIs do)
+    # still canonicalize to the stateless native identity below.
+    native_loopback_redirects = bool(request.redirect_uris) and all(
         _is_native_loopback_redirect(uri) for uri in request.redirect_uris
     )
     if not configured_redirects and not native_loopback_redirects:
-        raise HTTPException(status_code=400, detail="redirect_uri is not approved for this server")
+        raise OAuthProtocolError("invalid_redirect_uri", "redirect_uri is not approved for this server")
 
     scopes = _parse_scopes(request.scope)
     if frozenset(scopes) != SUPPORTED_SCOPES:
-        raise HTTPException(status_code=400, detail="Client registration must include the server's canonical scopes")
+        raise OAuthProtocolError("invalid_client_metadata", "Client registration must include the server's canonical scopes")
 
     redirect_set = frozenset(request.redirect_uris)
     if redirect_set.issubset(_CLAUDE_CALLBACKS):
@@ -469,7 +485,7 @@ def _verify_pkce(code_data: AuthorizationCode, code_verifier: str | None) -> Non
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
     computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
     if not secrets.compare_digest(computed, code_data.code_challenge):
-        raise HTTPException(status_code=400, detail="PKCE verification failed")
+        raise OAuthProtocolError("invalid_grant", "PKCE verification failed")
 
 
 @router.post(
@@ -503,29 +519,29 @@ async def token(
     presented_refresh_token: str | None = None
     if grant_type == "authorization_code":
         if code is None or redirect_uri is None:
-            raise HTTPException(status_code=400, detail="code and redirect_uri are required")
+            raise OAuthProtocolError("invalid_request", "code and redirect_uri are required")
 
         code_data = await store.get_auth_code(code)
         if code_data is None:
-            raise HTTPException(status_code=400, detail="Invalid or expired authorization code")
+            raise OAuthProtocolError("invalid_grant", "Invalid or expired authorization code")
         if code_data.client_id != client_id or code_data.redirect_uri != redirect_uri:
-            raise HTTPException(status_code=400, detail="Authorization code binding mismatch")
+            raise OAuthProtocolError("invalid_grant", "Authorization code binding mismatch")
         if client_id == _NATIVE_PUBLIC_CLIENT_ID and not _is_native_loopback_redirect(redirect_uri):
-            raise HTTPException(status_code=400, detail="Authorization code binding mismatch")
+            raise OAuthProtocolError("invalid_grant", "Authorization code binding mismatch")
         _verify_pkce(code_data, code_verifier)
 
         consumed = await store.consume_auth_code(code)
         if consumed is None:
-            raise HTTPException(status_code=400, detail="Authorization code already used")
+            raise OAuthProtocolError("invalid_grant", "Authorization code already used")
         scopes = consumed.scopes
         refresh_family_id = secrets.token_urlsafe(24)
     elif grant_type == "refresh_token":
         if refresh_token is None:
-            raise HTTPException(status_code=400, detail="refresh_token is required")
+            raise OAuthProtocolError("invalid_request", "refresh_token is required")
         scopes, refresh_family_id = _decode_refresh_token(refresh_token, client_id)
         presented_refresh_token = refresh_token
     else:
-        raise HTTPException(status_code=400, detail="Unsupported grant type")
+        raise OAuthProtocolError("unsupported_grant_type", "Unsupported grant type")
 
     access_token = create_access_token(client_id, scopes)
     rotated_refresh_token = create_refresh_token(client_id, scopes, refresh_family_id)
@@ -539,7 +555,7 @@ async def token(
         refresh_state,
         ttl_seconds=refresh_ttl_seconds,
     ):
-        raise HTTPException(status_code=401, detail="Invalid or replayed refresh token")
+        raise OAuthProtocolError("invalid_grant", "Invalid or replayed refresh token", status_code=401)
     return TokenResponse(
         access_token=access_token,
         refresh_token=rotated_refresh_token,
@@ -603,7 +619,7 @@ def _decode_refresh_token(token_value: str, expected_client_id: str) -> tuple[tu
     try:
         payload = _decode_claims(token_value)
     except PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="Invalid refresh token") from exc
+        raise OAuthProtocolError("invalid_grant", "Invalid refresh token", status_code=401) from exc
     scopes = _validated_scopes(payload)
     family_id = payload.get("family")
     if (
@@ -613,7 +629,7 @@ def _decode_refresh_token(token_value: str, expected_client_id: str) -> tuple[tu
         or not isinstance(family_id, str)
         or len(family_id) < 16
     ):
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        raise OAuthProtocolError("invalid_grant", "Invalid refresh token", status_code=401)
     return scopes, family_id
 
 
