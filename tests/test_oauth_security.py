@@ -303,7 +303,9 @@ async def test_undeclared_application_type_with_loopback_canonicalizes_to_native
 
 async def test_registration_errors_carry_rfc7591_error_codes() -> None:
     with pytest.raises(OAuthProtocolError) as redirect_error:
-        await register_client(_registration(redirect_uris=["https://attacker.invalid/callback"]), InMemoryOAuthStateStore())
+        await register_client(
+            _registration(redirect_uris=["https://attacker.invalid/callback"]), InMemoryOAuthStateStore()
+        )
     with pytest.raises(OAuthProtocolError) as scope_error:
         await register_client(_registration(scope="read"), InMemoryOAuthStateStore())
 
