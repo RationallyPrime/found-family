@@ -30,7 +30,7 @@ dependencies = [
 [tool.uv]
 # Security floor: aiohttp <3.14.3 carries two HIGH CVEs (incl. CVE-2026-69244),
 # pulled transitively via voyageai; the CI Trivy fs scan gates on HIGH/CRITICAL.
-constraint-dependencies = ["aiohttp>=3.14.3"]
+constraint-dependencies = ["aiohttp>=3.14.3", "cryptography>=50.0.0"]
 
 [build-system]
 requires = ["hatchling"]
