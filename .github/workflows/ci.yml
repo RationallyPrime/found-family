@@ -62,7 +62,7 @@ jobs:
     timeout-minutes: 10
     services:
       neo4j:
-        image: neo4j:5.26-community-trixie@sha256:4bae36aff76271e27fd6a6ed0835413f86a284cd179cfb1cb7d188f5f7533aca
+        image: neo4j:5.26-community-trixie@sha256:865213f53381e8d2ef3eec08b11741a6722d388a5e70b134135186a9b5cb27a6
         env:
           NEO4J_AUTH: neo4j/ci-integration-password
         ports:
@@ -152,7 +152,7 @@ jobs:
           TRIVY_IGNOREFILE: .trivyignore.yaml
         with:
           scan-type: image
-          image-ref: neo4j:5.26-community-trixie@sha256:4bae36aff76271e27fd6a6ed0835413f86a284cd179cfb1cb7d188f5f7533aca
+          image-ref: neo4j:5.26-community-trixie@sha256:865213f53381e8d2ef3eec08b11741a6722d388a5e70b134135186a9b5cb27a6
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
