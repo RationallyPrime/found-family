@@ -210,6 +210,7 @@ async def oauth_protocol_error_handler(_request: Request, exc: oauth.OAuthProtoc
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
 
+
 # Add MCP support — expose only the memory verbs as tools.
 # OAuth/discovery endpoints stay HTTP-only; a memory palace's tool list
 # should read like memory: remember, recall, awaken, forget.
