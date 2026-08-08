@@ -386,7 +386,9 @@ async def register_client(
 
     scopes = _parse_scopes(request.scope)
     if frozenset(scopes) != SUPPORTED_SCOPES:
-        raise OAuthProtocolError("invalid_client_metadata", "Client registration must include the server's canonical scopes")
+        raise OAuthProtocolError(
+            "invalid_client_metadata", "Client registration must include the server's canonical scopes"
+        )
 
     redirect_set = frozenset(request.redirect_uris)
     if redirect_set.issubset(_CLAUDE_CALLBACKS):
